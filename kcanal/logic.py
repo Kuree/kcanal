@@ -39,14 +39,14 @@ class Mux(Generator):
     def __init__(self, height: int, width: int, is_clone: bool = False):
         name = "Mux_{0}".format(height)
         super().__init__(name, is_clone=is_clone)
-        self.param("width", value=width, initial_value=2)
+        self.width = self.param("width", value=width, initial_value=2)
 
         if height < 1:
             height = 1
         self.height = height
 
-        self.in_ = self.input("I", width, size=[height], explicit_array=True)
-        self.out_ = self.output("O", width)
+        self.in_ = self.input("I", self.width, size=[height], explicit_array=True)
+        self.out_ = self.output("O", self.width)
         self.valid_in = self.input("valid_in", height)
         self.valid_out = self.output("valid_out", 1)
         self.ready_in = self.input("ready_in", 1)
