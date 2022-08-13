@@ -1,6 +1,7 @@
 from kratos import Generator, always_ff, always_comb, const, posedge, negedge
 from kratos.util import clog2
 import math
+import functools
 
 
 class OneHotDecoder(Generator):
@@ -46,10 +47,16 @@ class Mux(Generator):
 
         self.in_ = self.input("I", width, size=[height], explicit_array=True)
         self.out_ = self.output("O", width)
+        self.valid_in = self.input("valid_in", height)
+        self.valid_out = self.output("valid_out", 1)
+        self.ready_in = self.input("ready_in", 1)
+        self.ready_out = self.output("ready_out", height)
 
         # pass through wires
         if height == 1:
             self.wire(self.out_, self.in_)
+            self.wire(self.ready_out, self.ready_in)
+            self.wire(self.valid_out, self.valid_in)
             return
 
         sel_size = clog2(height)
@@ -64,8 +71,14 @@ class Mux(Generator):
 
         switch_ = comb.switch_(self.sel_out)
         for i in range(height):
-            switch_.case_(1 << i, self.out_.assign(self.in_[i]))
+            v = 1 << i
+            switch_.case_(v, self.out_.assign(self.in_[i]))
+            switch_.case_(v, self.valid_out.assign(self.valid_in[i]))
         switch_.case_(None, self.out_.assign(0))
+        switch_.case_(None, self.valid_out.assign(0))
+
+        broadcast = [self.ready_in for _ in range(height)]
+        self.wire(self.ready_out, kratos.concat(*broadcast))
 
 
 class ConfigRegister(Generator):
@@ -111,5 +124,5 @@ class ConfigRegister(Generator):
 
 if __name__ == "__main__":
     import kratos
-    mod = ConfigRegister(4, 42, 8, 32)
+    mod = Mux(4, 32)
     kratos.verilog(mod, filename="test.sv")
