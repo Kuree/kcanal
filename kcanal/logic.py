@@ -1,7 +1,9 @@
 from kratos import Generator, always_ff, always_comb, const, posedge, negedge
 from kratos.util import clog2
 import math
+from typing import Dict, List, Tuple
 import functools
+import operator
 
 
 class OneHotDecoder(Generator):
@@ -83,8 +85,8 @@ class Mux(Generator):
 
 class ConfigRegister(Generator):
     def __init__(self, width, addr, addr_width, data_width):
-        super(ConfigRegister, self).__init__("ConfigRegister")
-        self.width = self.param("width", value=width, initial_value=32)
+        super(ConfigRegister, self).__init__(f"ConfigRegister_{width}")
+        self.width = width
         self.addr_width = self.param("addr_width", value=addr_width, initial_value=8)
         self.data_width = self.param("data_width", value=data_width, initial_value=data_width)
         self.addr = self.param("addr", value=addr, initial_value=0)
@@ -96,10 +98,9 @@ class ConfigRegister(Generator):
         self.clk = self.clock("clk")
         self.rst_n = self.reset("rst_n")
 
-        self.value = self.var("value", width)
+        self.value = self.output("value", width)
 
-        self.in_ = self.input("I", data_width)
-        self.out_ = self.output("O", data_width)
+        self.read_config_data = self.output("read_config_data", data_width)
 
         self.enable = self.var("enable", 1)
         self.wire(self.enable, self.config_addr.extend(32) == self.addr)
@@ -112,17 +113,101 @@ class ConfigRegister(Generator):
         if ~self.rst_n:
             self.value = 0
         elif self.config_en and self.enable:
-            self.value = self.in_[self.value.width - 1, 0]
+            self.value = self.config_data[self.value.width - 1, 0]
 
     @always_comb
     def output_logic(self):
         if self.enable:
-            self.out_ = self.value.extend(self.data_width.value)
+            self.read_config_data = self.value.extend(self.data_width.value)
         else:
-            self.out_ = 0
+            self.read_config_data = 0
+
+
+class Configurable(Generator):
+    def __init__(self, name: str, config_addr_width: int, config_data_width: int, debug: bool = False):
+        super(Configurable, self).__init__(name, debug)
+
+        self.config_addr_width = config_addr_width
+        self.config_data_width = config_data_width
+
+        self.registers: Dict[str, kratos.Var] = {}
+        self.clk = self.clock("clk")
+        # reset low
+        self.reset = self.reset("rst_n", active_high=False)
+        self.read_config_data = self.output("read_config_data", config_data_width)
+        self.config_addr = self.input("config_addr", config_addr_width)
+        self.config_data = self.input("config_data", config_addr_width)
+        self.config_en = self.input("config_en", 1)
+
+    def add_config(self, name: str, width: int):
+        assert name not in self.registers, f"{name} already exists in configuration"
+        v = self.var(name, width)
+        self.registers[name] = v
+
+    def finalize(self):
+        # instantiate the configuration registers
+        # we use greedy bin packing
+        regs, reg_map = self.__compute_reg_packing()
+        registers: List[ConfigRegister] = []
+        for addr, reg_rest in enumerate(regs):
+            reg_width = self.config_data_width - reg_rest
+            print("reg_width", reg_width)
+            reg = ConfigRegister(reg_width, addr, self.config_addr_width, self.config_data_width)
+
+            self.add_child_generator(f"config_reg_{addr}", reg, clk=self.clk,
+                                     rst_n=self.reset, config_addr=self.config_addr,
+                                     config_data=self.config_data, config_en=self.config_en)
+            registers.append(reg)
+
+        # assign slice
+        for name, (idx, start_addr) in reg_map.items():
+            v = self.registers[name]
+            hi: int = start_addr + v.width - 1
+            lo: int = start_addr
+            slice_ = registers[idx].value[hi, lo]
+            self.wire(v, slice_)
+        # OR all the read config data
+        read_data_ors = [reg.read_config_data for reg in registers]
+        read_data_value = functools.reduce(operator.or_, read_data_ors)
+        self.wire(self.read_config_data, read_data_value)
+
+    def __compute_reg_packing(self):
+        # greedy bin packing
+        regs: List[int] = []
+        reg_map: Dict[str, Tuple[int, int]] = {}
+
+        def place(n: str, var: kratos.Var):
+            res = False
+            w = var.width
+            assert w <= self.config_data_width
+            for idx, rest in enumerate(regs):
+                if rest >= w:
+                    # place it
+                    reg_map[n] = (idx, rest)
+                    regs[idx] = rest - w
+                    res = True
+                    break
+            if not res:
+                # place a new one
+                rest = self.config_data_width - w
+                reg_map[n] = (len(regs), 0)
+                regs.append(rest)
+
+        # to ensure deterministic behavior, names are sorted first
+        names = list(self.registers.keys())
+        names.sort()
+        for name in names:
+            v = self.registers[name]
+            place(name, v)
+
+        return regs, reg_map
 
 
 if __name__ == "__main__":
     import kratos
-    mod = Mux(4, 32)
-    kratos.verilog(mod, filename="test.sv")
+    config = Configurable("Core", 32, 32, debug=True)
+    config.add_config("test1", 16)
+    config.add_config("test3", 16)
+    config.add_config("test2", 20)
+    config.finalize()
+    kratos.verilog(config, filename="test.sv")
