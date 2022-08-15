@@ -4,6 +4,7 @@ import math
 from typing import Dict, List, Tuple
 import functools
 import operator
+import kratos
 
 
 class OneHotDecoder(Generator):
@@ -79,8 +80,7 @@ class Mux(Generator):
         switch_.case_(None, self.out_.assign(0))
         switch_.case_(None, self.valid_out.assign(0))
 
-        broadcast = [self.ready_in for _ in range(height)]
-        self.wire(self.ready_out, kratos.concat(*broadcast))
+        self.wire(self.ready_out, self.ready_in.duplicate(height))
 
 
 class ConfigRegister(Generator):
@@ -134,7 +134,6 @@ class Configurable(Generator):
         self.clk = self.clock("clk")
         # reset low
         self.reset = self.reset("rst_n", active_high=False)
-        self.read_config_data = self.output("read_config_data", config_data_width)
         self.config_addr = self.input("config_addr", config_addr_width)
         self.config_data = self.input("config_data", config_addr_width)
         self.config_en = self.input("config_en", 1)
@@ -143,6 +142,7 @@ class Configurable(Generator):
         assert name not in self.registers, f"{name} already exists in configuration"
         v = self.var(name, width)
         self.registers[name] = v
+        return v
 
     def finalize(self):
         # instantiate the configuration registers
@@ -151,7 +151,6 @@ class Configurable(Generator):
         registers: List[ConfigRegister] = []
         for addr, reg_rest in enumerate(regs):
             reg_width = self.config_data_width - reg_rest
-            print("reg_width", reg_width)
             reg = ConfigRegister(reg_width, addr, self.config_addr_width, self.config_data_width)
 
             self.add_child_generator(f"config_reg_{addr}", reg, clk=self.clk,
@@ -166,10 +165,6 @@ class Configurable(Generator):
             lo: int = start_addr
             slice_ = registers[idx].value[hi, lo]
             self.wire(v, slice_)
-        # OR all the read config data
-        read_data_ors = [reg.read_config_data for reg in registers]
-        read_data_value = functools.reduce(operator.or_, read_data_ors)
-        self.wire(self.read_config_data, read_data_value)
 
     def __compute_reg_packing(self):
         # greedy bin packing
@@ -203,11 +198,97 @@ class Configurable(Generator):
         return regs, reg_map
 
 
+class FIFO(Generator):
+    # based on https://github.com/StanfordAHA/garnet/blob/spVspV/global_buffer/design/fifo.py
+    def __init__(self, data_width, depth):
+
+        super().__init__(f"reg_fifo_d_{depth}")
+
+        self.data_width = self.parameter("data_width", 16)
+        self.data_width.value = data_width
+        self.depth = depth
+
+        # CLK and RST
+        self.clk = self.clock("clk")
+        self.reset = self.reset("reset")
+        self.clk_en = self.clock_en("clk_en", 1)
+
+        # INPUTS
+        self.data_in = self.input("I", self.data_width)
+        self.data_out = self.output("O", self.data_width)
+
+        self.push = self.input("push", 1)
+        self.pop = self.input("pop", 1)
+        ptr_width = max(1, clog2(self.depth))
+
+        self._rd_ptr = self.var("rd_ptr", ptr_width)
+        self._wr_ptr = self.var("wr_ptr", ptr_width)
+        self._read = self.var("read", 1)
+        self._write = self.var("write", 1)
+        self._reg_array = self.var("reg_array", self.data_width, size=self.depth, packed=True, explicit_array=True)
+
+        self.empty = self.var("empty", 1)
+        self.full = self.var("full", 1)
+
+        self.valid_out = self.output("valid_out", 1)
+        self.wire(self.valid_out, ~self.empty)
+        self.ready_out = self.output("ready_out", 1)
+        self.wire(self.ready_out, ~self.full)
+
+        self._num_items = self.var("num_items", clog2(self.depth) + 1)
+        self.wire(self.full, self._num_items == self.depth)
+        self.wire(self.empty, self._num_items == 0)
+        self.wire(self._read, self.pop & ~self.empty)
+
+        self.wire(self._write, self.push & ~self.full)
+        self.add_code(self.set_num_items)
+        self.add_code(self.reg_array_ff)
+        self.add_code(self.wr_ptr_ff)
+        self.add_code(self.rd_ptr_ff)
+        self.add_code(self.data_out_ff)
+
+    @always_ff((posedge, "clk"), (posedge, "reset"))
+    def rd_ptr_ff(self):
+        if self.reset:
+            self._rd_ptr = 0
+        elif self._read:
+            self._rd_ptr = self._rd_ptr + 1
+
+    @always_ff((posedge, "clk"), (posedge, "reset"))
+    def wr_ptr_ff(self):
+        if self.reset:
+            self._wr_ptr = 0
+        elif self._write:
+            if self._wr_ptr == (self.depth - 1):
+                self._wr_ptr = 0
+            else:
+                self._wr_ptr = self._wr_ptr + 1
+
+    @always_ff((posedge, "clk"), (posedge, "reset"))
+    def reg_array_ff(self):
+        if self.reset:
+            self._reg_array = 0
+        elif self._write:
+            self._reg_array[self._wr_ptr] = self.data_in
+
+    @always_comb
+    def data_out_ff(self):
+        self.data_out = self._reg_array[self._rd_ptr]
+
+    @always_ff((posedge, "clk"), (posedge, "reset"))
+    def set_num_items(self):
+        if self.reset:
+            self._num_items = 0
+        elif self._write & ~self._read:
+            self._num_items = self._num_items + 1
+        elif ~self._write & self._read:
+            self._num_items = self._num_items - 1
+        else:
+            self._num_items = self._num_items
+
+
 if __name__ == "__main__":
     import kratos
-    config = Configurable("Core", 32, 32, debug=True)
-    config.add_config("test1", 16)
-    config.add_config("test3", 16)
-    config.add_config("test2", 20)
-    config.finalize()
-    kratos.verilog(config, filename="test.sv")
+
+    fifo = FIFO(16, 10)
+    kratos.verilog(fifo, filename="test.sv")
