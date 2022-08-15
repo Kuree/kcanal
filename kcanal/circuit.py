@@ -101,6 +101,9 @@ class SB(Configurable):
         self.__connect_sb_out()
         self.__connect_regs()
 
+        self.__add_config_reg()
+        self.__handle_reg_clk_en()
+
         self.__lift_ports()
 
     def __create_sb_mux(self):
@@ -219,12 +222,38 @@ class SB(Configurable):
             self.wire(reg.push, mux.ready_out)
             self.__handle_rmux_fanin(sb_node, n, node)
 
+    @staticmethod
+    def __get_mux_sel_name(node: Node):
+        return f"{create_name(str(node))}_sel"
+
+    def __add_config_reg(self):
+        for _, (sb, mux) in self.sb_muxs.items():
+            config_name = self.__get_mux_sel_name(sb)
+            if mux.height > 1:
+                self.add_config(config_name, mux.sel.width)
+                self.wire(self.registers[config_name], mux.sel)
+
+        for _, (reg_mux, mux) in self.reg_muxs.items():
+            config_name = self.__get_mux_sel_name(reg_mux)
+            assert mux.height == 2
+            self.add_config(config_name, mux.sel.width)
+            self.wire(self.registers[config_name], mux.sel)
+
     def __handle_rmux_fanin(self, sb: Node, rmux: RegisterMuxNode,
                             reg: RegisterNode):
         pass
 
     def __handle_reg_clk_en(self):
-        pass
+        reg: FIFO
+        for (reg_node, reg) in self.regs.values():
+            rmux: RegisterMuxNode = list(reg_node)[0]
+            # get rmux address
+            config_name = self.__get_mux_sel_name(rmux)
+            config_reg = self.registers[config_name]
+            index_val = rmux.get_conn_in().index(reg_node)
+            en = self.var(create_name(str(rmux)) + "_clk_en", 1)
+            self.wire(en, (config_reg == index_val) & self.clk_en)
+            self.wire(reg.clk_en, kratos.clock_en(en))
 
 
 if __name__ == "__main__":
