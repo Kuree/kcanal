@@ -65,6 +65,7 @@ class CB(Configurable):
         self.in_ = self.input("I", self.width, size=[self.mux.height], explicit_array=True)
         self.out_ = self.output("O", self.width)
         self.sel = self.add_config("sel", self.mux.sel.width)
+        self.en = self.add_config("en", self.mux.en.width)
         self.valid_in = self.port_from_def(self.mux.valid_in)
         self.valid_out = self.port_from_def(self.mux.valid_out)
         self.ready_in = self.port_from_def(self.mux.ready_in)
@@ -72,7 +73,7 @@ class CB(Configurable):
 
         self.add_child("mux", self.mux,
                        I=self.in_, O=self.out_, S=self.sel, valid_in=self.valid_in, valid_out=self.valid_out,
-                       ready_in=self.ready_in, ready_out=self.ready_out)
+                       ready_in=self.ready_in, ready_out=self.ready_out, enable=self.en)
 
 
 class SB(Configurable):
@@ -223,21 +224,30 @@ class SB(Configurable):
             self.__handle_rmux_fanin(sb_node, n, node)
 
     @staticmethod
-    def __get_mux_sel_name(node: Node):
-        return f"{create_name(str(node))}_sel"
+    def get_mux_sel_name(node: Node):
+        name = create_name(str(node))
+        sel = f"{name}_sel"
+        en = f"{name}_en"
+        return sel, en
 
     def __add_config_reg(self):
         for _, (sb, mux) in self.sb_muxs.items():
-            config_name = self.__get_mux_sel_name(sb)
+            config_name, en = self.get_mux_sel_name(sb)
             if mux.height > 1:
                 self.add_config(config_name, mux.sel.width)
                 self.wire(self.registers[config_name], mux.sel)
 
+                self.add_config(en, mux.en.width)
+                self.wire(self.registers[en], mux.en)
+
         for _, (reg_mux, mux) in self.reg_muxs.items():
-            config_name = self.__get_mux_sel_name(reg_mux)
+            config_name, en = self.get_mux_sel_name(reg_mux)
             assert mux.height == 2
             self.add_config(config_name, mux.sel.width)
             self.wire(self.registers[config_name], mux.sel)
+
+            self.add_config(en, mux.en.width)
+            self.wire(self.registers[en], mux.en)
 
     def __handle_rmux_fanin(self, sb: Node, rmux: RegisterMuxNode,
                             reg: RegisterNode):
@@ -248,7 +258,7 @@ class SB(Configurable):
         for (reg_node, reg) in self.regs.values():
             rmux: RegisterMuxNode = list(reg_node)[0]
             # get rmux address
-            config_name = self.__get_mux_sel_name(rmux)
+            config_name, _ = self.get_mux_sel_name(rmux)
             config_reg = self.registers[config_name]
             index_val = rmux.get_conn_in().index(reg_node)
             en = self.var(create_name(str(rmux)) + "_clk_en", 1)

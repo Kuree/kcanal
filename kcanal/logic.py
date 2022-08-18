@@ -62,37 +62,39 @@ class Mux(Generator):
             self.wire(self.valid_out, self.valid_in)
             return
 
+        self.en = self.input("enable", 1)
+
         sel_size = clog2(height)
         self.sel = self.input("S", sel_size)
 
         decoder = OneHotDecoder(height)
-        self.sel_out = self.output("sel_out", decoder.output.width)
+        self.sel_out = self.output("sel_out", height)
         self.add_child("decoder", decoder,
-                       I=self.sel, O=self.sel_out)
+                       I=self.sel)
+        # if not enabled, clamp everything to 0
+        self.wire(self.sel_out, kratos.ternary(self.en, decoder.output[height - 1, 0], 0))
 
-        comb = self.combinational()
-
-        switch_ = comb.switch_(self.sel_out)
+        # let the synthesis tools to figure out AOI
+        temp_vars = []
         for i in range(height):
-            v = 1 << i
-            switch_.case_(v, self.out_.assign(self.in_[i]))
-            switch_.case_(v, self.valid_out.assign(self.valid_in[i]))
-        switch_.case_(None, self.out_.assign(0))
-        switch_.case_(None, self.valid_out.assign(0))
+            var = self.var(f"temp_{i}", width)
+            self.wire(var, kratos.ternary(self.sel_out[i], self.in_[i], 0))
+            temp_vars.append(var)
 
+        self.wire(self.out_, functools.reduce(operator.or_, temp_vars))
+        self.wire(self.valid_out, (self.valid_in & self.sel_out).r_or())
         self.wire(self.ready_out, self.ready_in.duplicate(height))
 
 
 class ConfigRegister(Generator):
-    def __init__(self, width, addr, addr_width, data_width):
-        super(ConfigRegister, self).__init__(f"ConfigRegister_{width}")
-        self.width = width
+    def __init__(self, width, addr, addr_width):
+        super(ConfigRegister, self).__init__(f"ConfigRegister")
+        self.width = self.param("width", value=width, initial_value=1)
         self.addr_width = self.param("addr_width", value=addr_width, initial_value=8)
-        self.data_width = self.param("data_width", value=data_width, initial_value=data_width)
         self.addr = self.param("addr", value=addr, initial_value=0)
 
         self.config_addr = self.input("config_addr", self.addr_width)
-        self.config_data = self.input("config_data", self.data_width)
+        self.config_data = self.input("config_data", self.width)
         self.config_en = self.input("config_en", 1)
 
         self.clk = self.clock("clk")
@@ -100,27 +102,17 @@ class ConfigRegister(Generator):
 
         self.value = self.output("value", width)
 
-        self.read_config_data = self.output("read_config_data", data_width)
-
         self.enable = self.var("enable", 1)
         self.wire(self.enable, self.config_addr.extend(32) == self.addr)
 
         self.add_always(self.value_logic)
-        self.add_always(self.output_logic)
 
     @always_ff((posedge, "clk"), (negedge, "rst_n"))
     def value_logic(self):
         if ~self.rst_n:
             self.value = 0
         elif self.config_en and self.enable:
-            self.value = self.config_data[self.value.width - 1, 0]
-
-    @always_comb
-    def output_logic(self):
-        if self.enable:
-            self.read_config_data = self.value.extend(self.data_width.value)
-        else:
-            self.read_config_data = 0
+            self.value = self.config_data
 
 
 class Configurable(Generator):
@@ -151,11 +143,11 @@ class Configurable(Generator):
         registers: List[ConfigRegister] = []
         for addr, reg_rest in enumerate(regs):
             reg_width = self.config_data_width - reg_rest
-            reg = ConfigRegister(reg_width, addr, self.config_addr_width, self.config_data_width)
+            reg = ConfigRegister(reg_width, addr, self.config_addr_width)
 
             self.add_child_generator(f"config_reg_{addr}", reg, clk=self.clk,
                                      rst_n=self.reset, config_addr=self.config_addr,
-                                     config_data=self.config_data, config_en=self.config_en)
+                                     config_data=self.config_data[reg_width - 1, 0], config_en=self.config_en)
             registers.append(reg)
 
         # assign slice
@@ -178,7 +170,7 @@ class Configurable(Generator):
             for idx, rest in enumerate(regs):
                 if rest >= w:
                     # place it
-                    reg_map[n] = (idx, rest)
+                    reg_map[n] = (idx, self.config_data_width - rest)
                     regs[idx] = rest - w
                     res = True
                     break
