@@ -74,6 +74,10 @@ class InterconnectCore:
     def outputs(self) -> List[kratos.Port]:
         pass
 
+    @abstractmethod
+    def core_name(self) -> str:
+        pass
+
 
 class Node:
     def __init__(self, x: int, y: int, width: int):

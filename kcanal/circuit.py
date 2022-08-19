@@ -2,38 +2,25 @@ import kratos
 
 from typing import List, Dict, Tuple, Union
 from .cyclone import InterconnectCore, PortNode, Node, SwitchBox, RegisterNode, RegisterMuxNode, SwitchBoxNode, \
-    SwitchBoxIO, ImranSwitchBox
-from .logic import Configurable, Mux, FIFO
+    SwitchBoxIO, ImranSwitchBox, Tile
+from .logic import Configurable, Mux, FIFO, ReadyValidGenerator
 
 
-class Core(kratos.Generator, InterconnectCore):
+class Core(ReadyValidGenerator, InterconnectCore):
     def __init__(self, name: str, debug: bool = False):
         super(Core, self).__init__(name, debug)
 
         self.__input_ports: List[kratos.Port] = []
         self.__output_ports: List[kratos.Port] = []
 
-    def input_rv(self, name, width) -> kratos.Port:
-        p = self.input(name, width)
-        # also add ready valid interface
-        self.input(f"{name}_valid", 1)
-        self.output(f"{name}_ready", 1)
-        self.__input_ports.append(p)
-        return p
-
-    def output_rv(self, name, width) -> kratos.Port:
-        p = self.output(name, width)
-        # also add ready valid interface
-        self.output(f"{name}_valid", 1)
-        self.input(f"{name}_ready", 1)
-        self.__output_ports.append(p)
-        return p
-
     def inputs(self) -> List[kratos.Port]:
         return self.__input_ports
 
     def outputs(self) -> List[kratos.Port]:
         return self.__output_ports
+
+    def core_name(self) -> str:
+        return self.name
 
 
 def create_name(name: str):
@@ -56,11 +43,10 @@ def _create_mux(node: Node):
 
 
 class CB(Configurable):
-    def __init__(self, node: PortNode,
-                 config_addr_width: int, config_data_width: int):
+    def __init__(self, node: PortNode, config_addr_width: int, config_data_width: int, debug: bool = False):
         self.node = node
         self.width = node.width
-        super(CB, self).__init__(create_name(str(node)), config_addr_width, config_data_width)
+        super(CB, self).__init__(create_name(str(node)), config_addr_width, config_data_width, debug=debug)
 
         self.mux = _create_mux(node)
         self.in_ = self.input("I", self.width, size=[self.mux.height], explicit_array=True)
@@ -78,9 +64,10 @@ class CB(Configurable):
 
 
 class SB(Configurable):
-    def __init__(self, switchbox: SwitchBox, config_addr_width: int, config_data_width: int, core_name: str):
+    def __init__(self, switchbox: SwitchBox, config_addr_width: int, config_data_width: int, core_name: str,
+                 debug: bool = False):
         name = f"SB_ID{switchbox.id}_{switchbox.num_track}TRACKS_B{switchbox.width}_{core_name}"
-        super(SB, self).__init__(name, config_addr_width, config_data_width)
+        super(SB, self).__init__(name, config_addr_width, config_data_width, debug=debug)
         self.switchbox = switchbox
         self.clk_en = self.clock_en("clk_en", 1)
 
@@ -331,6 +318,134 @@ class SB(Configurable):
             en = self.var(create_name(str(rmux)) + "_clk_en", 1)
             self.wire(en, (config_reg == index_val) & self.clk_en)
             self.wire(reg.clk_en, kratos.clock_en(en))
+
+
+class TileCircuit(ReadyValidGenerator):
+    def __init__(self, tiles: Dict[int, Tile], config_addr_width: int, config_data_width: int,
+                 tile_id_width: int = 16,
+                 full_config_addr_width: int = 32, debug: bool = False):
+        x = -1
+        y = -1
+        core: Union[None, Core] = None
+        self.additional_cores = []
+        additional_core_names = set()
+        for bit_width, tile in tiles.items():
+            assert bit_width == tile.track_width
+            if x == -1:
+                x = tile.x
+                y = tile.y
+                assert isinstance(tile.core, Core)
+                core = tile.core
+            else:
+                assert x == tile.x
+                assert y == tile.y
+                # the restriction is that all the tiles in the same coordinate
+                # have to have the same core, otherwise it's physically
+                # impossible
+                assert core == tile.core
+            for a_core, _ in tile.additional_cores:
+                a_core = a_core
+                assert isinstance(a_core, Core)
+                core_name = a_core.name()
+                if core_name not in additional_core_names:
+                    self.additional_cores.append(a_core)
+                    additional_core_names.add(core_name)
+
+        assert x != -1 and y != -1
+        self.x = x
+        self.y = y
+        self.core = core
+
+        if self.core is None:
+            name = "Tile_Empty"
+        else:
+            name = f"Tile_{self.core.core_name()}"
+        super(TileCircuit, self).__init__(name, debug=debug)
+
+        self.tiles = tiles
+        self.config_addr_width = config_addr_width
+        self.config_data_width = config_data_width
+        self.tile_id_width = tile_id_width
+
+        self.clk = self.clock("clk")
+        # reset low
+        self.reset = self.reset("rst_n", active_high=False)
+        self.config_addr = self.input("config_addr", config_addr_width)
+        self.config_data = self.input("config_data", config_data_width)
+
+        # compute config addr sizes
+        # (16, 24)
+        full_width = full_config_addr_width
+        self.full_config_addr_width = full_config_addr_width
+        self.feature_addr_slice = slice(full_width - self.tile_id_width,
+                                        full_width - self.config_addr_width)
+        # (0, 16)
+        self.tile_id_slice = slice(0, self.tile_id_width)
+        # (24, 32)
+        self.feature_config_slice = slice(full_width - self.config_addr_width,
+                                          full_width)
+
+        # create cb and switchbox
+        self.cbs: Dict[str, CB] = {}
+        self.sbs: Dict[int, SB] = {}
+
+        self.features: List[Configurable] = []
+
+        self.__create_cb()
+        self.__create_sb()
+
+    def __create_cb(self):
+        for bit_width, tile in self.tiles.items():
+            # connection box time
+            for port_name, port_node in tile.ports.items():
+                # input ports
+                if len(port_node) == 0:
+                    assert bit_width == port_node.width
+                    # make sure that it has at least one connection
+                    if len(port_node.get_conn_in()) == 0:
+                        continue
+                    # create a CB
+                    cb = CB(port_node, self.config_addr_width, self.config_data_width, debug=self.debug)
+                    self.add_child(f"CB_{port_name}", cb, clk=self.clk, rst_n=self.reset)
+                    self.features.append(cb)
+                    p = self.__get_core_port(port_name)
+                    self.wire(cb.ports.O, p)
+                    self.cbs[port_name] = cb
+
+                else:
+                    # output ports
+                    assert len(port_node.get_conn_in()) == 0
+                    assert bit_width == port_node.width
+
+    def __create_sb(self):
+        for bit_width, tile in self.tiles.items():
+            core_name = self.core.name() if self.core is not None else ""
+            sb = SB(tile.switchbox, self.config_addr_width, self.config_data_width,
+                    core_name, debug=self.debug)
+            self.add_child(sb.name, sb, clk=self.clk, rst_n=self.reset)
+            self.sbs[sb.switchbox.width] = sb
+
+    def __connect_cb_sb(self):
+        pass
+
+    def __lift_ports(self):
+        pass
+
+    def __setup_tile_id(self):
+        pass
+
+    def finalize(self):
+        for feat in self.features:
+            feat.finalize()
+        # set up config addr
+
+    def __get_core_port(self, port_name):
+        if port_name in self.core.ports:
+            return self.core.ports[port_name]
+        for core in self.additional_cores:
+            if port_name in core.ports:
+                return core.ports[port_name]
+        return None
 
 
 if __name__ == "__main__":
