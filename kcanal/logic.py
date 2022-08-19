@@ -116,12 +116,15 @@ class ConfigRegister(Generator):
             self.value = self.config_data
 
 
+ReadyValidTuple = Tuple[_kratos.Port, _kratos.Port, _kratos.Port]
+
+
 class ReadyValidGenerator(Generator):
     def __init__(self, name: str, debug: bool = False):
         super(ReadyValidGenerator, self).__init__(name, debug)
 
-    def port_from_def_rv(self, port: _kratos.Port, port_name: str) -> Tuple[_kratos.Port, _kratos.Port, _kratos.Port]:
-        p = self.port_from_def(port, port_name)
+    def port_from_def_rv(self, port: _kratos.Port, port_name: str, check_param: bool = True) -> ReadyValidTuple:
+        p = self.port_from_def(port, port_name, check_param)
         ready_name = f"{port_name}_ready"
         valid_name = f"{port_name}_valid"
         if port.port_direction == kratos.PortDirection.In:
@@ -132,7 +135,7 @@ class ReadyValidGenerator(Generator):
             r = self.input(ready_name, 1)
         return p, r, v
 
-    def input_rv(self, port_name, width) -> Tuple[_kratos.Port, _kratos.Port, _kratos.Port]:
+    def input_rv(self, port_name, width) -> ReadyValidTuple:
         p = self.input(port_name, width)
         ready_name = f"{port_name}_ready"
         valid_name = f"{port_name}_valid"
@@ -172,7 +175,7 @@ class Configurable(ReadyValidGenerator):
         # reset low
         self.reset = self.reset("rst_n", active_high=False)
         self.config_addr = self.input("config_addr", config_addr_width)
-        self.config_data = self.input("config_data", config_addr_width)
+        self.config_data = self.input("config_data", config_data_width)
         self.config_en = self.input("config_en", 1)
 
     def add_config(self, name: str, width: int):

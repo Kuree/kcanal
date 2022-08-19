@@ -2,7 +2,7 @@ import kratos
 
 from typing import List, Dict, Tuple, Union
 from .cyclone import InterconnectCore, PortNode, Node, SwitchBox, RegisterNode, RegisterMuxNode, SwitchBoxNode, \
-    SwitchBoxIO
+    SwitchBoxIO, ImranSwitchBox
 from .logic import Configurable, Mux, FIFO
 
 
@@ -48,8 +48,9 @@ def create_name(name: str):
 
 def _create_mux(node: Node):
     conn_in = node.get_conn_in()
-    assert len(conn_in) > 0, f"{node} does not have any connections"
     height = len(conn_in)
+    if height == 0:
+        height = 1
     mux = Mux(height, node.width)
     return mux
 
@@ -114,7 +115,9 @@ class SB(Configurable):
         sbs = self.switchbox.get_all_sbs()
         for sb in sbs:
             sb_name = str(sb)
-            self.sb_muxs[sb_name] = (sb, _create_mux(sb))
+            mux = _create_mux(sb)
+            self.add_child("MUX_" + create_name(sb_name), mux)
+            self.sb_muxs[sb_name] = (sb, mux)
 
     def __create_regs(self):
         for reg_name, reg_node in self.switchbox.registers.items():
@@ -154,8 +157,8 @@ class SB(Configurable):
             ready_name = f"{port_name}_ready"
             valid_name = f"{port_name}_valid"
             if sb.io == SwitchBoxIO.SB_IN:
-                p, r, v = self.port_from_def_rv(mux.in_, port_name)
-                self.wire(p, mux.out_)
+                p, r, v = self.port_from_def_rv(mux.in_, port_name, check_param=False)
+                self.wire(p, mux.in_)
                 self.wire(r, mux.ready_out)
                 self.wire(v, mux.valid_in)
             else:
@@ -185,7 +188,7 @@ class SB(Configurable):
                 else:
                     p = self.port_from_def(mux.ready_in, ready_name)
                     self.wire(p, mux.ready_in)
-                p = self.port_from_def(mux.out_, port_name)
+                p = self.port_from_def(mux.out_, port_name, check_param=False)
                 self.wire(p, mux.out_)
 
                 p = self.port_from_def(mux.valid_out, valid_name)
@@ -264,7 +267,7 @@ class SB(Configurable):
                 self.wire(v, mux.valid_in[idx])
 
     def __connect_sb_in(self):
-        for _, (sb, mux) in self.sb_muxs.items():
+        for _, (sb, sb_mux) in self.sb_muxs.items():
             if sb.io != SwitchBoxIO.SB_IN:
                 continue
             nodes = list(sb)
@@ -273,12 +276,12 @@ class SB(Configurable):
             merge = self.var(f"{sb_name}_ready_merge", 1)
             merge_vars = []
             for node in nodes:
+                idx = node.get_conn_in().index(sb)
                 if isinstance(node, SwitchBoxNode):
                     # make sure it's a mux
                     assert len(node.get_conn_in()) > 1, "Invalid routing topology"
                     mux = self.sb_muxs[str(node)][-1]
-                    idx = node.get_conn_in().index(sb)
-                    ready = mux.sel_out[idx] & mux.ready_out
+                    ready = mux.sel_out[idx] & mux.ready_out[idx]
                     merge_vars.append(ready)
                 else:
                     assert isinstance(node, PortNode)
@@ -287,9 +290,9 @@ class SB(Configurable):
                         p = self.ports[sel_out_name]
                     else:
                         p = self.input(sel_out_name, len(node.get_conn_in()))
-                    merge_vars.append(p)
+                    merge_vars.append(p[idx])
             self.wire(merge, kratos.util.reduce_or(*merge_vars))
-            self.wire(mux.read_in, merge)
+            self.wire(sb_mux.ready_in, merge)
 
     @staticmethod
     def get_mux_sel_name(node: Node):
@@ -333,13 +336,11 @@ class SB(Configurable):
 if __name__ == "__main__":
     def main():
         import kratos
-        node = PortNode("test", 0, 0, 16)
-        for _ in range(5):
-            Node(0, 0, 16).add_edge(node)
-
-        cb = CB(node, 32, 32)
-        cb.finalize()
-        kratos.verilog(cb, filename="test.sv")
+        kratos.set_global_debug(True)
+        switchbox = ImranSwitchBox(0, 0, 2, 1)
+        sb = SB(switchbox, 8, 32, "Test")
+        sb.finalize()
+        kratos.verilog(sb, filename="test.sv")
 
 
     main()
