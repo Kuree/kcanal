@@ -1,6 +1,6 @@
 import kratos
 
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Union
 from .cyclone import InterconnectCore, PortNode, Node, SwitchBox, RegisterNode, RegisterMuxNode, SwitchBoxNode, \
     SwitchBoxIO
 from .logic import Configurable, Mux, FIFO
@@ -102,10 +102,13 @@ class SB(Configurable):
         self.__connect_sb_out()
         self.__connect_regs()
 
+        self.__connect_sb_in()
+
         self.__add_config_reg()
         self.__handle_reg_clk_en()
 
         self.__lift_ports()
+        self.__handle_port_connection()
 
     def __create_sb_mux(self):
         sbs = self.switchbox.get_all_sbs()
@@ -147,20 +150,46 @@ class SB(Configurable):
         for sb_name, (sb, mux) in self.sb_muxs.items():
             # only lift them if the ports are connect to the outside world
             port_name = create_name(sb_name)
+            # ready valid interface
+            ready_name = f"{port_name}_ready"
+            valid_name = f"{port_name}_valid"
             if sb.io == SwitchBoxIO.SB_IN:
-                p = self.port_from_def(mux.in_, port_name)
+                p, r, v = self.port_from_def_rv(mux.in_, port_name)
                 self.wire(p, mux.out_)
+                self.wire(r, mux.ready_out)
+                self.wire(v, mux.valid_in)
             else:
-                p = self.port_from_def(mux.out_, port_name)
-
                 # to see if we have a register mux here
                 # if so , we need to lift the reg_mux output instead
                 if sb_name in self.reg_muxs:
                     # override the mux value
+                    sb_mux = mux
                     node, mux = self.reg_muxs[sb_name]
                     assert isinstance(node, RegisterMuxNode)
                     assert node in sb
+                    #     /-- reg--\
+                    # sb /          | rmux
+                    #    \---------/
+                    p = self.var(f"{sb_name}_ready_merge", 1)
+                    reg_node: Union[RegisterNode, None] = None
+                    for reg_node in sb:
+                        if isinstance(reg_node, RegisterNode):
+                            break
+                    assert reg_node is not None
+                    conn_in = node.get_conn_in()
+                    rmux_idx = conn_in.index(node)
+                    reg_idx = conn_in.index(reg_node)
+                    reg = self.regs[reg_node.name][1]
+                    self.wire(p, (mux.ready_out & mux.sel_out[rmux_idx]) | (reg.ready_out & mux.sel_out[reg_idx]))
+                    self.wire(p, sb_mux.ready_in)
+                else:
+                    p = self.port_from_def(mux.ready_in, ready_name)
+                    self.wire(p, mux.ready_in)
+                p = self.port_from_def(mux.out_, port_name)
                 self.wire(p, mux.out_)
+
+                p = self.port_from_def(mux.valid_out, valid_name)
+                self.wire(p, mux.valid_out)
 
     def __connect_sbs(self):
         # the principle is that it only connects to the nodes within
@@ -221,7 +250,46 @@ class SB(Configurable):
             # need to connect valid signals
             self.wire(reg.valid_out, mux.valid_in[idx])
             self.wire(reg.push, mux.ready_out)
-            self.__handle_rmux_fanin(sb_node, n, node)
+
+    def __handle_port_connection(self):
+        for _, (sb, mux) in self.sb_muxs.items():
+            if sb.io != SwitchBoxIO.SB_OUT:
+                continue
+            nodes_from = sb.get_conn_in()
+            for idx, node in enumerate(nodes_from):
+                if not isinstance(node, PortNode):
+                    continue
+                _, r, v = self.input_rv(node.name, node.width)
+                self.wire(r, mux.ready_out)
+                self.wire(v, mux.valid_in[idx])
+
+    def __connect_sb_in(self):
+        for _, (sb, mux) in self.sb_muxs.items():
+            if sb.io != SwitchBoxIO.SB_IN:
+                continue
+            nodes = list(sb)
+            # need to merge the ready in properly
+            sb_name = create_name(str(sb))
+            merge = self.var(f"{sb_name}_ready_merge", 1)
+            merge_vars = []
+            for node in nodes:
+                if isinstance(node, SwitchBoxNode):
+                    # make sure it's a mux
+                    assert len(node.get_conn_in()) > 1, "Invalid routing topology"
+                    mux = self.sb_muxs[str(node)][-1]
+                    idx = node.get_conn_in().index(sb)
+                    ready = mux.sel_out[idx] & mux.ready_out
+                    merge_vars.append(ready)
+                else:
+                    assert isinstance(node, PortNode)
+                    sel_out_name = node.name + "_sel_out"
+                    if sel_out_name in self.ports:
+                        p = self.ports[sel_out_name]
+                    else:
+                        p = self.input(sel_out_name, len(node.get_conn_in()))
+                    merge_vars.append(p)
+            self.wire(merge, kratos.util.reduce_or(*merge_vars))
+            self.wire(mux.read_in, merge)
 
     @staticmethod
     def get_mux_sel_name(node: Node):
@@ -248,10 +316,6 @@ class SB(Configurable):
 
             self.add_config(en, mux.en.width)
             self.wire(self.registers[en], mux.en)
-
-    def __handle_rmux_fanin(self, sb: Node, rmux: RegisterMuxNode,
-                            reg: RegisterNode):
-        pass
 
     def __handle_reg_clk_en(self):
         reg: FIFO

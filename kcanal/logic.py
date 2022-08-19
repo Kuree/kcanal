@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple
 import functools
 import operator
 import kratos
+import _kratos
 
 
 class OneHotDecoder(Generator):
@@ -115,7 +116,51 @@ class ConfigRegister(Generator):
             self.value = self.config_data
 
 
-class Configurable(Generator):
+class ReadyValidGenerator(Generator):
+    def __init__(self, name: str, debug: bool = False):
+        super(ReadyValidGenerator, self).__init__(name, debug)
+
+    def port_from_def_rv(self, port: _kratos.Port, port_name: str) -> Tuple[_kratos.Port, _kratos.Port, _kratos.Port]:
+        p = self.port_from_def(port, port_name)
+        ready_name = f"{port_name}_ready"
+        valid_name = f"{port_name}_valid"
+        if port.port_direction == kratos.PortDirection.In:
+            v = self.input(valid_name, 1)
+            r = self.output(ready_name, 1)
+        else:
+            v = self.output(valid_name, 1)
+            r = self.input(ready_name, 1)
+        return p, r, v
+
+    def input_rv(self, port_name, width) -> Tuple[_kratos.Port, _kratos.Port, _kratos.Port]:
+        p = self.input(port_name, width)
+        ready_name = f"{port_name}_ready"
+        valid_name = f"{port_name}_valid"
+        r = self.input(valid_name, 1)
+        v = self.output(ready_name, 1)
+        return p, r, v
+
+    def output_rv(self, port_name, width) -> Tuple[_kratos.Port, _kratos.Port, _kratos.Port]:
+        p = self.output(port_name, width)
+        ready_name = f"{port_name}_ready"
+        valid_name = f"{port_name}_valid"
+        v = self.output(valid_name, 1)
+        r = self.input(ready_name, 1)
+        return p, r, v
+
+    def wire_rv(self, port1: _kratos.Port, port2: _kratos.Port):
+        self.wire(port1, port2)
+        port1_gen: _kratos.Generator = port1.generator
+        port2_gen: _kratos.Generator = port2.generator
+        port1_ready = port1_gen.get_port(f"{port1.name}_ready")
+        port2_ready = port2_gen.get_port(f"{port2.name}_ready")
+        port1_valid = port1_gen.get_port(f"{port1.name}_valid")
+        port2_valid = port2_gen.get_port(f"{port2.name}_valid")
+        self.wire(port1_ready, port2_ready)
+        self.wire(port1_valid, port2_valid)
+
+
+class Configurable(ReadyValidGenerator):
     def __init__(self, name: str, config_addr_width: int, config_data_width: int, debug: bool = False):
         super(Configurable, self).__init__(name, debug)
 
