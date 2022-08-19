@@ -1,4 +1,5 @@
 import kratos
+import _kratos
 
 from typing import List, Dict, Tuple, Union
 from .cyclone import InterconnectCore, PortNode, Node, SwitchBox, RegisterNode, RegisterMuxNode, SwitchBoxNode, \
@@ -393,6 +394,13 @@ class TileCircuit(ReadyValidGenerator):
 
         self.__create_cb()
         self.__create_sb()
+        self.__lift_ports()
+        self.__lift_internal_ports()
+
+        self.__wire_cb()
+        self.__connect_cb_sb()
+        self.__connect_core()
+        self.__setup_tile_id()
 
     def __create_cb(self):
         for bit_width, tile in self.tiles.items():
@@ -406,12 +414,8 @@ class TileCircuit(ReadyValidGenerator):
                         continue
                     # create a CB
                     cb = CB(port_node, self.config_addr_width, self.config_data_width, debug=self.debug)
-                    self.add_child(f"CB_{port_name}", cb, clk=self.clk, rst_n=self.reset)
+                    self.add_child(f"CB_{port_name}", cb, clk=self.clk, rst_n=self.reset, config_data=self.config_data)
                     self.features.append(cb)
-                    p = self.__get_core_port(port_name)
-                    self.wire(cb.ports.O, p)
-                    self.cbs[port_name] = cb
-
                 else:
                     # output ports
                     assert len(port_node.get_conn_in()) == 0
@@ -425,10 +429,102 @@ class TileCircuit(ReadyValidGenerator):
             self.add_child(sb.name, sb, clk=self.clk, rst_n=self.reset)
             self.sbs[sb.switchbox.width] = sb
 
+    def __wire_cb(self):
+        for port_name, cb in self.cbs.items():
+            p = self.__get_core_port(port_name)
+            self.wire(cb.out_, p)
+            valid_name = f"{port_name}_valid"
+            valid = self.__get_core_port(valid_name)
+            self.wire(cb.valid_out, valid)
+            ready_name = f"{port_name}_ready"
+            self.wire(cb.ready_in, self.__get_core_port(ready_name))
+
     def __connect_cb_sb(self):
-        pass
+        # connect ports from cb to switch box and back
+        for _, cb in self.cbs.items():
+            conn_ins = cb.node.get_conn_in()
+            for idx, node in enumerate(conn_ins):
+                assert isinstance(node,
+                                  (SwitchBoxNode, RegisterMuxNode, PortNode))
+                # for IO tiles they have connections to other tiles
+                if node.x != self.x or node.y != self.y:
+                    continue
+                bit_width = node.width
+                sb_circuit = self.sbs[bit_width]
+                if not isinstance(node, PortNode):
+                    # get the internal wire
+                    n, sb_mux = sb_circuit.sb_muxs[str(node)]
+                    assert n == node
+                    sb_name = create_name(str(node))
+                    if node.io == SwitchBoxIO.SB_IN:
+                        self.wire(self.ports[sb_name], cb.in_[idx])
+                        port_name = create_name(str(node)) + "_valid"
+                        self.wire(self.ports[port_name],
+                                  cb.ports.valid_in[idx])
+                    else:
+                        self.wire(sb_circuit.ports[sb_name], cb.in_[idx])
+                else:
+                    # this is an additional core port
+                    # just connect directly
+                    self.wire(self.__get_core_port(node.name), cb.in_[idx])
+                    node_valid = node.name + "_valid"
+                    p = self.__get_core_port(node_valid)
+                    self.wire(p, cb.valid_in[idx])
+
+    def __connect_core(self):
+        for bit_width, tile in self.tiles.items():
+            sb_circuit = self.sbs[bit_width]
+            for _, port_node in tile.ports.items():
+                if len(port_node) == 0:
+                    continue
+                assert len(port_node.get_conn_in()) == 0
+                port_name = port_node.name
+                for sb_node in port_node:
+                    assert isinstance(sb_node, (SwitchBoxNode, PortNode))
+                    if isinstance(sb_node, PortNode):
+                        continue
+                    # for IO tiles they have connections to other tiles
+                    if sb_node.x != self.x or sb_node.y != self.y:
+                        continue
+                    idx = sb_node.get_conn_in().index(port_node)
+                    # we need to find the actual mux
+                    n, mux = sb_circuit.sb_muxs[str(sb_node)]
+                    assert n == sb_node
+                    self.wire(self.__get_core_port(port_name),
+                              sb_circuit.ports[port_name])
+                    sb_circuit.wire(sb_circuit.ports[port_name],
+                                    mux.in_[idx])
+
+                    ready_name = f"{port_name}_ready"
+                    valid_name = f"{port_name}_valid"
+                    loopback = self.var(f"{port_name}_valid_loopback", 1)
+                    self.wire(loopback, sb_circuit.ports[ready_name] & self.__get_core_port(valid_name))
+                    self.wire(sb_circuit.ports[valid_name], loopback)
 
     def __lift_ports(self):
+        for _, switchbox in self.sbs.items():
+            sbs = switchbox.switchbox.get_all_sbs()
+            assert switchbox.switchbox.x == self.x
+            assert switchbox.switchbox.y == self.y
+            for sb in sbs:
+                sb_name = create_name(str(sb))
+                node, mux = switchbox.sb_muxs[str(sb)]
+                assert node == sb
+                assert sb.x == self.x
+                assert sb.y == self.y
+                port: _kratos.Port = switchbox.ports[sb_name]
+                if node.io == SwitchBoxIO.SB_IN:
+                    p, v, r = self.input_rv(sb_name, switchbox.switchbox.width)
+                else:
+                    p, v, r = self.output_rv(sb_name, switchbox.switchbox.width)
+
+                sv = switchbox.ports[sb_name + "_valid"]
+                sr = switchbox.ports[sb_name + "_ready"]
+                self.wire(p, port)
+                self.wire(v, sv)
+                self.wire(r, sr)
+
+    def __lift_internal_ports(self):
         pass
 
     def __setup_tile_id(self):
