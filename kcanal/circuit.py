@@ -50,7 +50,7 @@ class CB(Configurable):
         super(CB, self).__init__(create_name(str(node)), config_addr_width, config_data_width, debug=debug)
 
         self.mux = _create_mux(node)
-        self.in_ = self.input("I", self.width, size=[self.mux.height], explicit_array=True)
+        self.in_ = self.input("I", self.width, size=[self.mux.height], packed=True)
         self.out_ = self.output("O", self.width)
         self.sel = self.add_config("sel", self.mux.sel.width)
         self.en = self.add_config("en", self.mux.en.width)
@@ -371,7 +371,7 @@ class TileCircuit(ReadyValidGenerator):
         self.clk = self.clock("clk")
         # reset low
         self.reset = self.reset("rst_n", active_high=False)
-        self.config_addr = self.input("config_addr", config_addr_width)
+        self.config_addr = self.input("config_addr", full_config_addr_width)
         self.config_data = self.input("config_data", config_data_width)
 
         # compute config addr sizes

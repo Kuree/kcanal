@@ -49,7 +49,7 @@ class Mux(Generator):
             height = 1
         self.height = height
 
-        self.in_ = self.input("I", self.width, size=[height], explicit_array=True)
+        self.in_ = self.input("I", self.width, size=[height], packed=True)
         self.out_ = self.output("O", self.width)
         self.valid_in = self.input("valid_in", height)
         self.valid_out = self.output("valid_out", 1)
