@@ -380,6 +380,7 @@ class TileCircuit(ReadyValidGenerator):
         self.full_config_addr_width = full_config_addr_width
         self.feature_addr_slice = slice(full_width - self.tile_id_width,
                                         full_width - self.config_addr_width)
+        self.feature_addr_size = self.feature_addr_slice.stop - self.feature_addr_slice.start
         # (0, 16)
         self.tile_id_slice = slice(0, self.tile_id_width)
         # (24, 32)
@@ -416,7 +417,7 @@ class TileCircuit(ReadyValidGenerator):
                     if len(port_node.get_conn_in()) == 0:
                         continue
                     # create a CB
-                    cb = CB(port_node, self.config_addr_width, self.config_data_width, debug=self.debug)
+                    cb = CB(port_node, self.feature_addr_size, self.config_data_width, debug=self.debug)
                     self.add_child(f"CB_{port_name}", cb, clk=self.clk, rst_n=self.reset, config_data=self.config_data)
                     self.features.append(cb)
                 else:
@@ -427,7 +428,7 @@ class TileCircuit(ReadyValidGenerator):
     def __create_sb(self):
         for bit_width, tile in self.tiles.items():
             core_name = self.core.name() if self.core is not None else ""
-            sb = SB(tile.switchbox, self.config_addr_width, self.config_data_width,
+            sb = SB(tile.switchbox, self.feature_addr_size, self.config_data_width,
                     core_name, debug=self.debug)
             self.add_child(sb.name, sb, clk=self.clk, rst_n=self.reset)
             self.sbs[sb.switchbox.width] = sb
@@ -573,6 +574,14 @@ class TileCircuit(ReadyValidGenerator):
         for feat in self.features:
             feat.finalize()
         # set up config addr
+        for feat_addr, feat in enumerate(self.features):
+            en = self.var(feat.instance_name + "_en", 1)
+            self.wire(en, self.config_addr[self.feature_config_slice.stop - 1,
+                                           self.feature_config_slice.start].eq(feat_addr).eq(self.tile_en))
+            self.wire(en, feat.config_en)
+            self.wire(feat.config_addr,
+                      self.config_addr[self.feature_addr_slice.stop - 1, self.feature_addr_slice.start])
+            self.wire(feat.config_data, self.config_data)
 
     def __get_core_port(self, port_name):
         if port_name in self.core.ports:
