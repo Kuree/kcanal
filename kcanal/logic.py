@@ -162,6 +162,18 @@ class ReadyValidGenerator(Generator):
         self.wire(port1_ready, port2_ready)
         self.wire(port1_valid, port2_valid)
 
+    def lift_rv(self, port: _kratos.Port):
+        p, r, v = self.port_from_def_rv(port, port.name, check_param=False)
+        self.wire(p, port)
+        port_ready = port.generator.get_port(f"{port.name}_ready")
+        port_valid = port.generator.get_port(f"{port.name}_valid")
+        self.wire(r, port_ready)
+        self.wire(v, port_valid)
+
+    def lift(self, port: _kratos.Port):
+        p = self.port_from_def(port, port.name, check_param=False)
+        self.wire(p, port)
+
 
 class Configurable(ReadyValidGenerator):
     def __init__(self, name: str, config_addr_width: int, config_data_width: int, debug: bool = False):

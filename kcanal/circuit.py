@@ -386,6 +386,9 @@ class TileCircuit(ReadyValidGenerator):
         self.feature_config_slice = slice(full_width - self.config_addr_width,
                                           full_width)
 
+        self.tile_id: kratos.Port
+        self.tile_en: kratos.Var
+
         # create cb and switchbox
         self.cbs: Dict[str, CB] = {}
         self.sbs: Dict[int, SB] = {}
@@ -513,22 +516,58 @@ class TileCircuit(ReadyValidGenerator):
                 assert sb.x == self.x
                 assert sb.y == self.y
                 port: _kratos.Port = switchbox.ports[sb_name]
-                if node.io == SwitchBoxIO.SB_IN:
-                    p, v, r = self.input_rv(sb_name, switchbox.switchbox.width)
-                else:
-                    p, v, r = self.output_rv(sb_name, switchbox.switchbox.width)
-
-                sv = switchbox.ports[sb_name + "_valid"]
-                sr = switchbox.ports[sb_name + "_ready"]
-                self.wire(p, port)
-                self.wire(v, sv)
-                self.wire(r, sr)
+                self.lift_rv(port)
 
     def __lift_internal_ports(self):
-        pass
+        for bit_width, sb in self.sbs.items():
+            if sb.switchbox.num_track > 0:
+                continue
+            # lift the input ports up
+            for port in self.core.inputs():
+                if port.width != bit_width:
+                    continue
+                # depends on if the port has any connection or not
+                # we lift the port up first
+                # if it has no connection, then we lift it up
+                port_name = port.name
+                port_node = self.tiles[bit_width].ports[port.name]
+                if port_node.get_conn_in():
+                    cb_input_port = self.cbs[port_name].in_
+                    self.lift_rv(cb_input_port)
+                else:
+                    p = self.core.ports[port_name]
+                    self.lift_rv(p)
+
+            # lift the output ports up
+            for port in self.core.outputs():
+                if port.width != bit_width:
+                    continue
+                port_name = port.name
+                port_node = self.tiles[bit_width].ports[port_name]
+                # depends on if the port has any connection or not
+                # we lift the port up first
+                # if it has connection, then we connect it to the core
+
+                core_ready = self.core.ports[port_name + "_ready"]
+                core_valid = self.core.ports[port_name + "_valid"]
+                if len(port_node) > 1:
+                    # and them together
+                    ready_merge = self.var(core_ready + "_merge", 1)
+                    ready = self.input(port_name + "_ready", len(port_node))
+                    self.wire(ready_merge, ready.r_or())
+                    self.wire(ready_merge, core_ready)
+                    valid = self.input(port_name + "_valid", 1)
+                    self.wire(valid, core_valid)
+                    self.lift(port)
+                else:
+                    self.lift_rv(port)
 
     def __setup_tile_id(self):
-        pass
+        # tile id is set up as an external port to avoid unq in synthesis
+        self.tile_id = self.input("tile_id", self.tile_id_width)
+        self.tile_en = self.var("tile_en", 1)
+        en = self.config_addr[self.tile_id_slice.stop - 1, self.tile_id_slice.start] == self.tile_id
+        self.wire(self.tile_en, en)
 
     def finalize(self):
         for feat in self.features:
