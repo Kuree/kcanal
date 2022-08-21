@@ -94,7 +94,7 @@ def test_tile_codegen():
     with tempfile.TemporaryDirectory() as temp:
         temp = "temp"
         filename = os.path.join(temp, "tile.sv")
-        kratos.verilog(tile_circuit, filename=filename, optimize_passthrough=False)
+        kratos.verilog(tile_circuit, filename=filename)
 
 
 if __name__ == "__main__":

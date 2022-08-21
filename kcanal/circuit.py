@@ -300,11 +300,12 @@ class SB(Configurable):
                     merge_vars.append(ready)
                 else:
                     assert isinstance(node, PortNode)
-                    sel_out_name = node.name + "_sel_out"
-                    if sel_out_name in self.ports:
-                        p = self.ports[sel_out_name]
+                    # notice this is sel_out & with ready from the CB side
+                    sel_name = node.name + "_sel"
+                    if sel_name in self.ports:
+                        p = self.ports[sel_name]
                     else:
-                        p = self.input(sel_out_name, len(node.get_conn_in()))
+                        p = self.input(sel_name, 1)
                     merge_vars.append(p[idx])
             self.wire(merge, kratos.util.reduce_or(*merge_vars))
             self.wire(sb_mux.ready_in, merge)
@@ -533,6 +534,8 @@ class TileCircuit(ReadyValidGenerator):
                     continue
                 assert len(port_node.get_conn_in()) == 0
                 port_name = port_node.name
+                self.wire(self.__get_core_port(port_name),
+                          sb_circuit.ports[port_name])
                 ready_ports = []
                 loopback = self.var(f"{port_name}_valid_loopback", 1)
                 for sb_index, sb_node in enumerate(port_node):
@@ -546,8 +549,6 @@ class TileCircuit(ReadyValidGenerator):
                     # we need to find the actual mux
                     n, mux = sb_circuit.sb_muxs[str(sb_node)]
                     assert n == sb_node
-                    self.wire(self.__get_core_port(port_name),
-                              sb_circuit.ports[port_name])
                     sb_circuit.wire(sb_circuit.ports[port_name],
                                     mux.in_[idx])
                     # check if the sel_out has been exposed to the sb_circuit
@@ -557,7 +558,7 @@ class TileCircuit(ReadyValidGenerator):
                     else:
                         sel_out = sb_circuit.lift(mux.sel_out, sel_out_name)
                     ready_name = f"{port_name}_ready"
-                    ready_ports.append(sb_circuit.ports[ready_name][sb_index] & sel_out[idx])
+                    ready_ports.append(sb_circuit.ports[ready_name][sb_index].and_(sel_out[idx]))
                 merge = self.var(f"{port_name}_ready_merge", 1)
                 self.wire(merge, kratos.util.reduce_or(*ready_ports))
                 valid_name = f"{port_name}_valid"
