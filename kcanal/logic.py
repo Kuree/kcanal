@@ -139,16 +139,16 @@ class ReadyValidGenerator(Generator):
         p = self.input(port_name, width)
         ready_name = f"{port_name}_ready"
         valid_name = f"{port_name}_valid"
-        r = self.input(valid_name, 1)
-        v = self.output(ready_name, 1)
+        r = self.output(ready_name, 1)
+        v = self.input(valid_name, 1)
         return p, r, v
 
     def output_rv(self, port_name, width) -> Tuple[_kratos.Port, _kratos.Port, _kratos.Port]:
         p = self.output(port_name, width)
         ready_name = f"{port_name}_ready"
         valid_name = f"{port_name}_valid"
-        v = self.output(valid_name, 1)
         r = self.input(ready_name, 1)
+        v = self.output(valid_name, 1)
         return p, r, v
 
     def wire_rv(self, port1: _kratos.Port, port2: _kratos.Port):
@@ -170,9 +170,10 @@ class ReadyValidGenerator(Generator):
         self.wire(r, port_ready)
         self.wire(v, port_valid)
 
-    def lift(self, port: _kratos.Port):
-        p = self.port_from_def(port, port.name, check_param=False)
+    def lift(self, port: _kratos.Port, port_name):
+        p = self.port_from_def(port, port_name, check_param=False)
         self.wire(p, port)
+        return p
 
 
 class Configurable(ReadyValidGenerator):

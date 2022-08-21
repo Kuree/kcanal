@@ -226,8 +226,8 @@ def connect_io(interconnect: InterconnectGraph,
 
 
 class DummyCore(Core):
-    def __init__(self):
-        super(DummyCore, self).__init__("DummyCore", False)
+    def __init__(self, config_addr_width, config_data_width):
+        super(DummyCore, self).__init__("DummyCore", config_addr_width, config_data_width, False)
         self.in16 = self.input_rv("in16", 16)
         self.out16 = self.output_rv("out16", 16)
         self.in1 = self.input_rv("in1", 1)
@@ -237,10 +237,10 @@ class DummyCore(Core):
         for i in [1, 16]:
             self.wire(self.ports[f"in{i}"], self.ports[f"out{i}"])
             self.wire(self.ports[f"in{i}_ready"], self.ports[f"out{i}_ready"])
-            self.wire(self.ports[f"in{i}_valid"], self.ports[f"out{i}_valid"])
+            self.wire(self.ports[f"out{i}_valid"], self.ports[f"in{i}_valid"])
 
 
 if __name__ == "__main__":
     import kratos
-    mod = DummyCore()
+    mod = DummyCore(8, 32)
     kratos.verilog(mod, filename="test.sv")

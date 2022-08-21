@@ -486,9 +486,6 @@ class Tile:
                 # create node
                 self.ports[port_name] = PortNode(port_name, self.x,
                                                  self.y, width)
-                if port_name not in self.__port_core:
-                    self.__port_core[port_name] = []
-                self.__port_core[port_name].append(core)
 
         if connection_type & CoreConnectionType.CB == CoreConnectionType.CB:
             inputs = core.inputs()

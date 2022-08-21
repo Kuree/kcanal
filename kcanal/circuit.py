@@ -1,3 +1,5 @@
+import functools
+
 import kratos
 import _kratos
 
@@ -7,21 +9,31 @@ from .cyclone import InterconnectCore, PortNode, Node, SwitchBox, RegisterNode, 
 from .logic import Configurable, Mux, FIFO, ReadyValidGenerator
 
 
-class Core(ReadyValidGenerator, InterconnectCore):
-    def __init__(self, name: str, debug: bool = False):
-        super(Core, self).__init__(name, debug)
+class Core(Configurable, InterconnectCore):
+    def __init__(self, name: str, config_addr_width: int, config_data_width: int, debug: bool = False):
+        super(Core, self).__init__(name, config_addr_width, config_data_width, debug)
 
-        self.__input_ports: List[kratos.Port] = []
-        self.__output_ports: List[kratos.Port] = []
+        self._input_ports: List[kratos.Port] = []
+        self._output_ports: List[kratos.Port] = []
 
     def inputs(self) -> List[kratos.Port]:
-        return self.__input_ports
+        return self._input_ports
 
     def outputs(self) -> List[kratos.Port]:
-        return self.__output_ports
+        return self._output_ports
 
     def core_name(self) -> str:
         return self.name
+
+    def input_rv(self, port_name, width) -> Tuple[_kratos.Port, _kratos.Port, _kratos.Port]:
+        p, r, v = Configurable.input_rv(self, port_name, width)
+        self._input_ports.append(p)
+        return p, r, v
+
+    def output_rv(self, port_name, width) -> Tuple[_kratos.Port, _kratos.Port, _kratos.Port]:
+        p, r, v = Configurable.output_rv(self, port_name, width)
+        self._output_ports.append(p)
+        return p, r, v
 
 
 def create_name(name: str):
@@ -58,10 +70,11 @@ class CB(Configurable):
         self.valid_out = self.port_from_def(self.mux.valid_out)
         self.ready_in = self.port_from_def(self.mux.ready_in)
         self.ready_out = self.port_from_def(self.mux.ready_out)
+        self.sel_out = self.port_from_def(self.mux.sel_out)
 
         self.add_child("mux", self.mux,
                        I=self.in_, O=self.out_, S=self.sel, valid_in=self.valid_in, valid_out=self.valid_out,
-                       ready_in=self.ready_in, ready_out=self.ready_out, enable=self.en)
+                       ready_in=self.ready_in, ready_out=self.ready_out, enable=self.en, sel_out=self.sel_out)
 
 
 class SB(Configurable):
@@ -250,8 +263,22 @@ class SB(Configurable):
             for idx, node in enumerate(nodes_from):
                 if not isinstance(node, PortNode):
                     continue
-                _, r, v = self.input_rv(node.name, node.width)
-                self.wire(r, mux.ready_out)
+                # assume in the same tile
+                assert node.x == sb.x
+                assert node.y == sb.y
+                if node.name in self.ports:
+                    p = self.ports[node.name]
+                    r = self.ports[f"{node.name}_ready"]
+                    v = self.ports[f"{node.name}_valid"]
+                else:
+                    # need to create it by hand
+                    p = self.input(node.name, node.width)
+                    ready_size = len(node)
+                    r = self.output(f"{node.name}_ready", ready_size)
+                    v = self.input(f"{node.name}_valid", 1)
+                ready_index = list(node).index(sb)
+                self.wire(p, mux.in_[idx])
+                self.wire(r[ready_index], mux.ready_out[idx])
                 self.wire(v, mux.valid_in[idx])
 
     def __connect_sb_in(self):
@@ -325,37 +352,7 @@ class TileCircuit(ReadyValidGenerator):
     def __init__(self, tiles: Dict[int, Tile], config_addr_width: int, config_data_width: int,
                  tile_id_width: int = 16,
                  full_config_addr_width: int = 32, debug: bool = False):
-        x = -1
-        y = -1
-        core: Union[None, Core] = None
-        self.additional_cores = []
-        additional_core_names = set()
-        for bit_width, tile in tiles.items():
-            assert bit_width == tile.track_width
-            if x == -1:
-                x = tile.x
-                y = tile.y
-                assert isinstance(tile.core, Core)
-                core = tile.core
-            else:
-                assert x == tile.x
-                assert y == tile.y
-                # the restriction is that all the tiles in the same coordinate
-                # have to have the same core, otherwise it's physically
-                # impossible
-                assert core == tile.core
-            for a_core, _ in tile.additional_cores:
-                a_core = a_core
-                assert isinstance(a_core, Core)
-                core_name = a_core.name()
-                if core_name not in additional_core_names:
-                    self.additional_cores.append(a_core)
-                    additional_core_names.add(core_name)
-
-        assert x != -1 and y != -1
-        self.x = x
-        self.y = y
-        self.core = core
+        self.__setup_tile_cores(tiles)
 
         if self.core is None:
             name = "Tile_Empty"
@@ -369,6 +366,7 @@ class TileCircuit(ReadyValidGenerator):
         self.tile_id_width = tile_id_width
 
         self.clk = self.clock("clk")
+        self.clk_en = self.clock_en("clk_en")
         # reset low
         self.reset = self.reset("rst_n", active_high=False)
         self.config_addr = self.input("config_addr", full_config_addr_width)
@@ -396,6 +394,7 @@ class TileCircuit(ReadyValidGenerator):
 
         self.features: List[Configurable] = []
 
+        self.__add_cores()
         self.__create_cb()
         self.__create_sb()
         self.__lift_ports()
@@ -405,6 +404,48 @@ class TileCircuit(ReadyValidGenerator):
         self.__connect_cb_sb()
         self.__connect_core()
         self.__setup_tile_id()
+
+    def __setup_tile_cores(self, tiles):
+        x = -1
+        y = -1
+        core: Union[None, Core] = None
+        self.additional_cores = []
+        additional_core_names = set()
+        for bit_width, tile in tiles.items():
+            assert bit_width == tile.track_width
+            if x == -1:
+                x = tile.x
+                y = tile.y
+                assert isinstance(tile.core, Core)
+                core = tile.core
+            else:
+                assert x == tile.x
+                assert y == tile.y
+                # the restriction is that all the tiles in the same coordinate
+                # have to have the same core, otherwise it's physically
+                # impossible
+                assert core == tile.core
+            for a_core, _ in tile.additional_cores:
+                a_core = a_core
+                assert isinstance(a_core, Core)
+                core_name = a_core.name()
+                if core_name not in additional_core_names:
+                    self.additional_cores.append(a_core)
+                    additional_core_names.add(core_name)
+
+        self.core = core
+
+        assert x != -1 and y != -1
+        self.x = x
+        self.y = y
+
+    def add_feature(self, instance_name: str, feature: Configurable, **kwargs):
+        self.add_child(instance_name, feature, **kwargs)
+        self.features.append(feature)
+        self.wire(self.clk, feature.clk)
+        self.wire(self.reset, feature.reset)
+        if "clk_en" in feature.ports:
+            self.wire(self.clk_en, feature.ports.clk_en)
 
     def __create_cb(self):
         for bit_width, tile in self.tiles.items():
@@ -418,8 +459,8 @@ class TileCircuit(ReadyValidGenerator):
                         continue
                     # create a CB
                     cb = CB(port_node, self.feature_addr_size, self.config_data_width, debug=self.debug)
-                    self.add_child(f"CB_{port_name}", cb, clk=self.clk, rst_n=self.reset, config_data=self.config_data)
-                    self.features.append(cb)
+                    self.add_feature(f"CB_{port_name}", cb)
+                    self.cbs[port_name] = cb
                 else:
                     # output ports
                     assert len(port_node.get_conn_in()) == 0
@@ -427,10 +468,10 @@ class TileCircuit(ReadyValidGenerator):
 
     def __create_sb(self):
         for bit_width, tile in self.tiles.items():
-            core_name = self.core.name() if self.core is not None else ""
+            core_name = self.core.name if self.core is not None else ""
             sb = SB(tile.switchbox, self.feature_addr_size, self.config_data_width,
                     core_name, debug=self.debug)
-            self.add_child(sb.name, sb, clk=self.clk, rst_n=self.reset)
+            self.add_feature(sb.name, sb)
             self.sbs[sb.switchbox.width] = sb
 
     def __wire_cb(self):
@@ -475,6 +516,15 @@ class TileCircuit(ReadyValidGenerator):
                     p = self.__get_core_port(node_valid)
                     self.wire(p, cb.valid_in[idx])
 
+        # connect sel_out as well
+        for cb in self.cbs.values():
+            for sb in self.sbs.values():
+                if cb.width != sb.switchbox.width:
+                    continue
+                sel_out_name = cb.node.name + "_sel_out"
+                if sel_out_name in sb.ports:
+                    self.wire(sb.ports[sel_out_name], cb.sel_out)
+
     def __connect_core(self):
         for bit_width, tile in self.tiles.items():
             sb_circuit = self.sbs[bit_width]
@@ -483,7 +533,9 @@ class TileCircuit(ReadyValidGenerator):
                     continue
                 assert len(port_node.get_conn_in()) == 0
                 port_name = port_node.name
-                for sb_node in port_node:
+                ready_ports = []
+                loopback = self.var(f"{port_name}_valid_loopback", 1)
+                for sb_index, sb_node in enumerate(port_node):
                     assert isinstance(sb_node, (SwitchBoxNode, PortNode))
                     if isinstance(sb_node, PortNode):
                         continue
@@ -498,12 +550,21 @@ class TileCircuit(ReadyValidGenerator):
                               sb_circuit.ports[port_name])
                     sb_circuit.wire(sb_circuit.ports[port_name],
                                     mux.in_[idx])
-
+                    # check if the sel_out has been exposed to the sb_circuit
+                    sel_out_name = create_name(str(sb_node)) + "_sel_out"
+                    if sel_out_name in sb_circuit.ports:
+                        sel_out = sb_circuit.ports[sel_out_name]
+                    else:
+                        sel_out = sb_circuit.lift(mux.sel_out, sel_out_name)
                     ready_name = f"{port_name}_ready"
-                    valid_name = f"{port_name}_valid"
-                    loopback = self.var(f"{port_name}_valid_loopback", 1)
-                    self.wire(loopback, sb_circuit.ports[ready_name] & self.__get_core_port(valid_name))
-                    self.wire(sb_circuit.ports[valid_name], loopback)
+                    ready_ports.append(sb_circuit.ports[ready_name][sb_index] & sel_out[idx])
+                merge = self.var(f"{port_name}_ready_merge", 1)
+                self.wire(merge, kratos.util.reduce_or(*ready_ports))
+                valid_name = f"{port_name}_valid"
+                ready_name = f"{port_name}_ready"
+                self.wire(loopback, self.__get_core_port(valid_name))
+                self.wire(sb_circuit.ports[valid_name], loopback)
+                self.wire(self.__get_core_port(ready_name), merge)
 
     def __lift_ports(self):
         for _, switchbox in self.sbs.items():
@@ -559,7 +620,7 @@ class TileCircuit(ReadyValidGenerator):
                     self.wire(ready_merge, core_ready)
                     valid = self.input(port_name + "_valid", 1)
                     self.wire(valid, core_valid)
-                    self.lift(port)
+                    self.lift(port, port.name)
                 else:
                     self.lift_rv(port)
 
@@ -569,6 +630,14 @@ class TileCircuit(ReadyValidGenerator):
         self.tile_en = self.var("tile_en", 1)
         en = self.config_addr[self.tile_id_slice.stop - 1, self.tile_id_slice.start] == self.tile_id
         self.wire(self.tile_en, en)
+
+    def __add_cores(self):
+        # add cores here
+        cores = [self.core] + self.additional_cores
+        for core in cores:
+            if core is None:
+                continue
+            self.add_feature(core.name, core)
 
     def finalize(self):
         for feat in self.features:
