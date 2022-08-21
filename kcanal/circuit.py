@@ -301,11 +301,11 @@ class SB(Configurable):
                 else:
                     assert isinstance(node, PortNode)
                     # notice this is sel_out & with ready from the CB side
-                    sel_name = node.name + "_sel"
+                    sel_name = node.name + "_sel_ready"
                     if sel_name in self.ports:
                         p = self.ports[sel_name]
                     else:
-                        p = self.input(sel_name, 1)
+                        p = self.input(sel_name, len(node.get_conn_in()))
                     merge_vars.append(p[idx])
             self.wire(merge, kratos.util.reduce_or(*merge_vars))
             self.wire(sb_mux.ready_in, merge)
@@ -522,9 +522,8 @@ class TileCircuit(ReadyValidGenerator):
             for sb in self.sbs.values():
                 if cb.width != sb.switchbox.width:
                     continue
-                sel_out_name = cb.node.name + "_sel_out"
-                if sel_out_name in sb.ports:
-                    self.wire(sb.ports[sel_out_name], cb.sel_out)
+                sel_out_name = cb.node.name + "_sel_ready"
+                self.wire(sb.ports[sel_out_name], cb.sel_out & cb.ready_out)
 
     def __connect_core(self):
         for bit_width, tile in self.tiles.items():
