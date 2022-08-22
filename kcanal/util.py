@@ -226,7 +226,7 @@ def connect_io(interconnect: InterconnectGraph,
 
 
 class DummyCore(Core):
-    def __init__(self, config_addr_width, config_data_width):
+    def __init__(self, config_addr_width: int = 8, config_data_width: int = 32):
         super(DummyCore, self).__init__("DummyCore", config_addr_width, config_data_width, False)
         self.in16 = self.input_rv("in16", 16)
         self.out16 = self.output_rv("out16", 16)
