@@ -167,8 +167,8 @@ class ReadyValidGenerator(Generator):
             port_name = port.name
         p, r, v = self.port_from_def_rv(port, port_name, check_param=False)
         self.wire(p, port)
-        port_ready = port.generator.get_port(f"{port_name}_ready")
-        port_valid = port.generator.get_port(f"{port_name}_valid")
+        port_ready = port.generator.get_port(f"{port.name}_ready")
+        port_valid = port.generator.get_port(f"{port.name}_valid")
         self.wire(r, port_ready)
         self.wire(v, port_valid)
 
@@ -304,14 +304,14 @@ class FIFO(Generator):
 
     @always_ff((posedge, "clk"), (posedge, "reset"))
     def rd_ptr_ff(self):
-        if self.reset:
+        if ~self.reset:
             self._rd_ptr = 0
         elif self._read:
             self._rd_ptr = self._rd_ptr + 1
 
     @always_ff((posedge, "clk"), (posedge, "reset"))
     def wr_ptr_ff(self):
-        if self.reset:
+        if ~self.reset:
             self._wr_ptr = 0
         elif self._write:
             if self._wr_ptr == (self.depth - 1):
@@ -321,7 +321,7 @@ class FIFO(Generator):
 
     @always_ff((posedge, "clk"), (posedge, "reset"))
     def reg_array_ff(self):
-        if self.reset:
+        if ~self.reset:
             self._reg_array = 0
         elif self._write:
             self._reg_array[self._wr_ptr] = self.data_in
@@ -332,7 +332,7 @@ class FIFO(Generator):
 
     @always_ff((posedge, "clk"), (posedge, "reset"))
     def set_num_items(self):
-        if self.reset:
+        if ~self.reset:
             self._num_items = 0
         elif self._write & ~self._read:
             self._num_items = self._num_items + 1

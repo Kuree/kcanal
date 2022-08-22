@@ -65,7 +65,7 @@ class Interconnect(ReadyValidGenerator):
                                tile_id_width=tile_id_width, full_config_addr_width=full_config_addr_width)
             self.tile_circuits[coord] = tile
             x, y = coord
-            self.add_child("Tile_X{0:02X}Y{1:02X".format(x, y), tile)
+            self.add_child("Tile_X{0:02X}Y{1:02X}".format(x, y), tile)
 
         self.__wire_tiles()
 

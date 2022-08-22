@@ -1,7 +1,8 @@
 import subprocess
 
 from kcanal.circuit import CB, SB, TileCircuit
-from kcanal.util import DummyCore
+from kcanal.interconnect import Interconnect
+from kcanal.util import DummyCore, create_uniform_interconnect, SwitchBoxType
 from kcanal.cyclone import PortNode, Node, ImranSwitchBox, DisjointSwitchBox, Tile, SwitchBoxSide, SwitchBoxIO, \
     SBConnectionType
 
@@ -59,7 +60,6 @@ def get_in_out_connections(num_tracks):
 
 @pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
 def test_tile_codegen():
-    kratos.set_global_debug(True)
     x, y = 0, 0
     tiles = {}
     bit_widths = [1, 16]
@@ -92,10 +92,60 @@ def test_tile_codegen():
                                tile_id_width=tile_id_width)
     tile_circuit.finalize()
     with tempfile.TemporaryDirectory() as temp:
-        temp = "temp"
         filename = os.path.join(temp, "tile.sv")
         kratos.verilog(tile_circuit, filename=filename)
+        check_verilog(filename)
+
+
+def test_interconnect_codegen():
+    addr_width = 8
+    data_width = 32
+    bit_widths = [1, 16]
+    tile_id_width = 16
+    track_length = 1
+    chip_size = 2
+    num_tracks = 5
+    # creates all the cores here
+    # we don't want duplicated cores when snapping into different interconnect
+    # graphs
+    cores = {}
+    core_type = DummyCore
+    for x in range(chip_size):
+        for y in range(chip_size):
+            cores[(x, y)] = core_type()
+
+    def create_core(xx: int, yy: int):
+        return cores[(xx, yy)]
+
+    in_conn = []
+    out_conn = []
+    for side in SwitchBoxSide:
+        in_conn.append((side, SwitchBoxIO.SB_IN))
+        out_conn.append((side, SwitchBoxIO.SB_OUT))
+    pipeline_regs = []
+    for track in range(num_tracks):
+        for side in SwitchBoxSide:
+            pipeline_regs.append((track, side))
+    ics = {}
+    for bit_width in bit_widths:
+        ic = create_uniform_interconnect(chip_size, chip_size, bit_width,
+                                         create_core,
+                                         {f"in{bit_width}": in_conn,
+                                          f"out{bit_width}": out_conn},
+                                         {track_length: num_tracks},
+                                         SwitchBoxType.Disjoint,
+                                         pipeline_regs)
+        ics[bit_width] = ic
+    interconnect = Interconnect(ics, addr_width, data_width, tile_id_width,
+                                lift_ports=True)
+    # finalize the design
+    interconnect.finalize()
+    with tempfile.TemporaryDirectory() as temp:
+        temp = "temp"
+        filename = os.path.join(temp, "interconnect.sv")
+        kratos.verilog(interconnect, filename=filename)
+        check_verilog(filename)
 
 
 if __name__ == "__main__":
-    test_tile_codegen()
+    test_interconnect_codegen()

@@ -124,7 +124,7 @@ class SB(Configurable):
         for reg_name, reg_node in self.switchbox.registers.items():
             reg = FIFO(self.switchbox.width, 2)
             inst_name = create_name(str(reg_node))
-            self.add_child(inst_name, reg, clk=self.clk)
+            self.add_child(inst_name, reg, clk=self.clk, reset=self.reset)
             self.regs[reg_name] = reg_node, reg
 
     def __create_reg_mux(self):
@@ -148,7 +148,9 @@ class SB(Configurable):
             # we use the sb_name instead so that when we lift the port up,
             # we can use the mux output instead
             sb_name = str(sb_node)
-            self.reg_muxs[sb_name] = (reg_mux, _create_mux(reg_mux))
+            mux = _create_mux(reg_mux)
+            self.reg_muxs[sb_name] = (reg_mux, mux)
+            self.add_child(create_name(str(reg_mux)), mux)
 
     def __lift_ports(self):
         for sb_name, (sb, mux) in self.sb_muxs.items():
@@ -181,14 +183,14 @@ class SB(Configurable):
                             break
                     assert reg_node is not None
                     conn_in = node.get_conn_in()
-                    rmux_idx = conn_in.index(node)
+                    rmux_idx = conn_in.index(sb)
                     reg_idx = conn_in.index(reg_node)
                     reg = self.regs[reg_node.name][1]
                     self.wire(p, (mux.ready_out & mux.sel_out[rmux_idx]) | (reg.ready_out & mux.sel_out[reg_idx]))
                     self.wire(p, sb_mux.ready_in)
-                else:
-                    p = self.port_from_def(mux.ready_in, ready_name)
-                    self.wire(p, mux.ready_in)
+
+                p = self.port_from_def(mux.ready_in, ready_name)
+                self.wire(p, mux.ready_in)
                 p = self.port_from_def(mux.out_, port_name, check_param=False)
                 self.wire(p, mux.out_)
 
@@ -253,7 +255,9 @@ class SB(Configurable):
 
             # need to connect valid signals
             self.wire(reg.valid_out, mux.valid_in[idx])
-            self.wire(reg.push, mux.ready_out)
+            self.wire(reg.pop, mux.ready_out[idx])
+            sb_mux = self.sb_muxs[sb_name][1]
+            self.wire(reg.push, sb_mux.valid_out)
 
     def __handle_port_connection(self):
         for _, (sb, mux) in self.sb_muxs.items():
@@ -548,8 +552,6 @@ class TileCircuit(ReadyValidGenerator):
                     # we need to find the actual mux
                     n, mux = sb_circuit.sb_muxs[str(sb_node)]
                     assert n == sb_node
-                    sb_circuit.wire(sb_circuit.ports[port_name],
-                                    mux.in_[idx])
                     # check if the sel_out has been exposed to the sb_circuit
                     sel_out_name = create_name(str(sb_node)) + "_sel_out"
                     if sel_out_name in sb_circuit.ports:
