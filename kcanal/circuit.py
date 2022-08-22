@@ -186,7 +186,8 @@ class SB(Configurable):
                     rmux_idx = conn_in.index(sb)
                     reg_idx = conn_in.index(reg_node)
                     reg = self.regs[reg_node.name][1]
-                    self.wire(p, (mux.ready_out & mux.sel_out[rmux_idx]) | (reg.ready_out & mux.sel_out[reg_idx]))
+                    self.wire(p, (mux.ready_out[rmux_idx] & mux.sel_out[rmux_idx]) | (
+                                reg.ready_out & mux.sel_out[reg_idx]))
                     self.wire(p, sb_mux.ready_in)
 
                 p = self.port_from_def(mux.ready_in, ready_name)
@@ -256,8 +257,6 @@ class SB(Configurable):
             # need to connect valid signals
             self.wire(reg.valid_out, mux.valid_in[idx])
             self.wire(reg.pop, mux.ready_out[idx])
-            sb_mux = self.sb_muxs[sb_name][1]
-            self.wire(reg.push, sb_mux.valid_out)
 
     def __handle_port_connection(self):
         for _, (sb, mux) in self.sb_muxs.items():

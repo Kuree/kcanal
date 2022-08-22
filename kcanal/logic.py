@@ -302,14 +302,14 @@ class FIFO(Generator):
         self.add_code(self.rd_ptr_ff)
         self.add_code(self.data_out_ff)
 
-    @always_ff((posedge, "clk"), (posedge, "reset"))
+    @always_ff((posedge, "clk"), (negedge, "reset"))
     def rd_ptr_ff(self):
         if ~self.reset:
             self._rd_ptr = 0
         elif self._read:
             self._rd_ptr = self._rd_ptr + 1
 
-    @always_ff((posedge, "clk"), (posedge, "reset"))
+    @always_ff((posedge, "clk"), (negedge, "reset"))
     def wr_ptr_ff(self):
         if ~self.reset:
             self._wr_ptr = 0
@@ -319,7 +319,7 @@ class FIFO(Generator):
             else:
                 self._wr_ptr = self._wr_ptr + 1
 
-    @always_ff((posedge, "clk"), (posedge, "reset"))
+    @always_ff((posedge, "clk"), (negedge, "reset"))
     def reg_array_ff(self):
         if ~self.reset:
             self._reg_array = 0
@@ -330,7 +330,7 @@ class FIFO(Generator):
     def data_out_ff(self):
         self.data_out = self._reg_array[self._rd_ptr]
 
-    @always_ff((posedge, "clk"), (posedge, "reset"))
+    @always_ff((posedge, "clk"), (negedge, "reset"))
     def set_num_items(self):
         if ~self.reset:
             self._num_items = 0

@@ -4,7 +4,7 @@ from kcanal.circuit import CB, SB, TileCircuit
 from kcanal.interconnect import Interconnect
 from kcanal.util import DummyCore, create_uniform_interconnect, SwitchBoxType
 from kcanal.cyclone import PortNode, Node, ImranSwitchBox, DisjointSwitchBox, Tile, SwitchBoxSide, SwitchBoxIO, \
-    SBConnectionType
+    SBConnectionType, SwitchBox
 
 import kratos
 import shutil
@@ -16,7 +16,14 @@ iverilog_available = shutil.which("iverilog") is not None
 
 
 def check_verilog(filename):
-    subprocess.check_call(["iverilog", os.path.basename(filename), "-g2012"], cwd=os.path.dirname(filename))
+    subprocess.check_call(["iverilog", os.path.basename(filename), "-g2012"], cwd=os.path.dirname(filename),
+                          stdout=None)
+
+
+def insert_pipeline_registers(sb: SwitchBox):
+    for side in SwitchBoxSide:
+        for track in range(sb.num_track):
+            sb.add_pipeline_register(side, track)
 
 
 @pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
@@ -34,8 +41,11 @@ def test_cb_codegen():
 
 
 @pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
-def test_sb_codegen():
+@pytest.mark.parametrize("insert_pipline", [True, False])
+def test_sb_codegen(insert_pipline):
     switchbox = ImranSwitchBox(0, 0, 2, 1)
+    if insert_pipline:
+        insert_pipeline_registers(switchbox)
     sb = SB(switchbox, 8, 32, "Test")
     sb.finalize()
     with tempfile.TemporaryDirectory() as temp:
@@ -141,7 +151,6 @@ def test_interconnect_codegen():
     # finalize the design
     interconnect.finalize()
     with tempfile.TemporaryDirectory() as temp:
-        temp = "temp"
         filename = os.path.join(temp, "interconnect.sv")
         kratos.verilog(interconnect, filename=filename)
         check_verilog(filename)
