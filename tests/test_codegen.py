@@ -15,7 +15,11 @@ import os
 iverilog_available = shutil.which("iverilog") is not None
 
 
-def check_verilog(filename):
+def check_verilog(mod, filename):
+    options = kratos.SystemVerilogCodeGenOptions()
+    # iverilog doesn't like unique case
+    options.unique_case = False
+    kratos.verilog(mod, filename=filename, codegen_options=options)
     subprocess.check_call(["iverilog", os.path.basename(filename), "-g2012"], cwd=os.path.dirname(filename),
                           stdout=None)
 
@@ -36,8 +40,7 @@ def test_cb_codegen():
     cb.finalize()
     with tempfile.TemporaryDirectory() as temp:
         filename = os.path.join(temp, "cb.sv")
-        kratos.verilog(cb, filename=filename)
-        check_verilog(filename)
+        check_verilog(cb, filename)
 
 
 @pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
@@ -50,8 +53,7 @@ def test_sb_codegen(insert_pipline):
     sb.finalize()
     with tempfile.TemporaryDirectory() as temp:
         filename = os.path.join(temp, "sb.sv")
-        kratos.verilog(sb, filename=filename)
-        check_verilog(filename)
+        check_verilog(sb, filename)
 
 
 def get_in_out_connections(num_tracks):
@@ -103,8 +105,7 @@ def test_tile_codegen():
     tile_circuit.finalize()
     with tempfile.TemporaryDirectory() as temp:
         filename = os.path.join(temp, "tile.sv")
-        kratos.verilog(tile_circuit, filename=filename)
-        check_verilog(filename)
+        check_verilog(tile_circuit, filename)
 
 
 def test_interconnect_codegen():
@@ -152,8 +153,7 @@ def test_interconnect_codegen():
     interconnect.finalize()
     with tempfile.TemporaryDirectory() as temp:
         filename = os.path.join(temp, "interconnect.sv")
-        kratos.verilog(interconnect, filename=filename)
-        check_verilog(filename)
+        check_verilog(interconnect, filename)
 
 
 if __name__ == "__main__":

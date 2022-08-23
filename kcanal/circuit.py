@@ -51,8 +51,19 @@ def _create_mux(node: Node):
     height = len(conn_in)
     if height == 0:
         height = 1
-    mux = Mux(height, node.width)
+    if height > 1:
+        mux = Mux.clone(height=height, width=node.width)
+        # set width parameter
+        mux.width.value = node.width
+    else:
+        mux = Mux(height=height, width=node.width)
     return mux
+
+
+def _create_reg(width) -> FIFO:
+    reg = FIFO.clone(data_width=width, depth=2)
+    reg.data_width.value = width
+    return reg
 
 
 class CB(Configurable):
@@ -122,7 +133,7 @@ class SB(Configurable):
 
     def __create_regs(self):
         for reg_name, reg_node in self.switchbox.registers.items():
-            reg = FIFO(self.switchbox.width, 2)
+            reg = _create_reg(reg_node.width)
             inst_name = create_name(str(reg_node))
             self.add_child(inst_name, reg, clk=self.clk, reset=self.reset)
             self.regs[reg_name] = reg_node, reg

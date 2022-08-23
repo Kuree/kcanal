@@ -101,7 +101,7 @@ class ConfigRegister(Generator):
         self.clk = self.clock("clk")
         self.rst_n = self.reset("rst_n")
 
-        self.value = self.output("value", width)
+        self.value = self.output("value", self.width)
 
         self.enable = self.var("enable", 1)
         self.wire(self.enable, self.config_addr.extend(32) == self.addr)
@@ -114,6 +114,14 @@ class ConfigRegister(Generator):
             self.value = 0
         elif self.config_en and self.enable:
             self.value = self.config_data
+
+
+def _get_config_reg(width, addr, addr_width) -> ConfigRegister:
+    reg = ConfigRegister.clone(width=width, addr=addr, addr_width=addr_width)
+    reg.width.value = width
+    reg.addr.value = addr
+    reg.addr_width.value = addr_width
+    return reg
 
 
 ReadyValidTuple = Tuple[_kratos.Port, _kratos.Port, _kratos.Port]
@@ -206,7 +214,7 @@ class Configurable(ReadyValidGenerator):
         registers: List[ConfigRegister] = []
         for addr, reg_rest in enumerate(regs):
             reg_width = self.config_data_width - reg_rest
-            reg = ConfigRegister(reg_width, addr, self.config_addr_width)
+            reg = _get_config_reg(reg_width, addr, self.config_addr_width)
 
             self.add_child_generator(f"config_reg_{addr}", reg, clk=self.clk,
                                      rst_n=self.reset, config_addr=self.config_addr,
