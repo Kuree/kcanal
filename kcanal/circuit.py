@@ -415,9 +415,6 @@ class TileCircuit(ReadyValidGenerator):
         self.__lift_ports()
         self.__lift_internal_ports()
 
-        self.__wire_cb()
-        self.__connect_cb_sb()
-        self.__connect_core()
         self.__setup_tile_id()
 
     def __setup_tile_cores(self, tiles):
@@ -652,6 +649,10 @@ class TileCircuit(ReadyValidGenerator):
             self.add_feature(core.name, core)
 
     def finalize(self):
+        self.__wire_cb()
+        self.__connect_cb_sb()
+        self.__connect_core()
+
         for feat in self.features:
             feat.finalize()
         # set up config addr

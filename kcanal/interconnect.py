@@ -289,8 +289,13 @@ class Interconnect(ReadyValidGenerator):
             self.tile_circuits.pop(coord)
 
     def finalize(self):
-        # optimization using clone?
+        # we assume that users knows what's going on with the tile definition
+        definition_tiles: Dict[str, TileCircuit] = {}
         for tile_circuit in self.tile_circuits.values():
+            if tile_circuit.name in definition_tiles:
+                ref = definition_tiles[tile_circuit.name].internal_generator
+                tile_circuit.internal_generator.set_clone_ref(ref)
+                continue
             if "clk" in tile_circuit.ports:
                 self.wire(self.clk, tile_circuit.clk)
                 self.wire(self.clk_en, tile_circuit.clk_en)
@@ -298,3 +303,4 @@ class Interconnect(ReadyValidGenerator):
                 self.wire(self.config_addr, tile_circuit.config_addr)
                 self.wire(self.config_data, tile_circuit.config_data)
             tile_circuit.finalize()
+            definition_tiles[tile_circuit.name] = tile_circuit
