@@ -156,6 +156,9 @@ class PortNode(Node):
     def __hash__(self):
         return super().__hash__() ^ hash(self.name)
 
+    def hash(self):
+        return hash(self.name)
+
 
 class RegisterNode(Node):
     def __init__(self, name: str, x: int, y: int, track: int, width: int):
@@ -228,6 +231,7 @@ class SwitchBox:
         self.num_track = num_track
         self.internal_wires = internal_wires
 
+        # TODO: set this id externally when creating ths switchbox to identify unique topology
         self.id = 0
 
         self.__sbs: List[List[List[SwitchBoxNode]]] = \
@@ -252,9 +256,6 @@ class SwitchBox:
                 self.__sbs[side_to][SwitchBoxIO.SB_OUT][track_to]
             # internal sb connection has no delay
             sb_from.add_edge(sb_to, 0)
-
-        # used to identify different types of switches
-        self.id = 0
 
         # hold the pipeline register related nodes
         self.registers: Dict[str, RegisterNode] = {}
@@ -388,6 +389,9 @@ class SwitchBox:
                                                            mux_node.side)
 
         return switchbox
+
+    def hash(self):
+        return hash(str(self))
 
 
 # helper class

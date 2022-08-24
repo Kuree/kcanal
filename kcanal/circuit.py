@@ -88,6 +88,13 @@ class CB(Configurable):
                        ready_in=self.ready_in, ready_out=self.ready_out, enable=self.en, sel_out=self.sel_out)
 
 
+def _create_cb(node: PortNode, config_addr_width: int, config_data_width: int) -> CB:
+    cb = CB.clone(node=node, config_addr_width=config_addr_width, config_data_width=config_data_width)
+    cb.width = node.width
+    cb.node = node
+    return cb
+
+
 class SB(Configurable):
     def __init__(self, switchbox: SwitchBox, config_addr_width: int, config_data_width: int, core_name: str,
                  debug: bool = False):
@@ -182,7 +189,7 @@ class SB(Configurable):
                     reg_idx = conn_in.index(reg_node)
                     reg = self.regs[reg_node.name][1]
                     self.wire(p, (mux.ready_out[rmux_idx] & mux.sel_out[rmux_idx]) | (
-                                reg.ready_out & mux.sel_out[reg_idx]))
+                            reg.ready_out & mux.sel_out[reg_idx]))
                     self.wire(p, sb_mux.ready_in)
 
                 p = self.port_from_def(mux.ready_in, ready_name)
@@ -366,6 +373,13 @@ class SB(Configurable):
         super(SB, self).finalize()
 
 
+def _create_sb(switchbox: SwitchBox, config_addr_width: int, config_data_width: int, core_name: str) -> SB:
+    sb = SB.clone(switchbox=switchbox, config_addr_width=config_addr_width, config_data_width=config_data_width,
+                  core_name=core_name)
+    setattr(sb, "switchbox", switchbox)
+    return sb
+
+
 class TileCircuit(ReadyValidGenerator):
     def __init__(self, tiles: Dict[int, Tile], config_addr_width: int, config_data_width: int,
                  tile_id_width: int = 16,
@@ -473,7 +487,7 @@ class TileCircuit(ReadyValidGenerator):
                     if len(port_node.get_conn_in()) == 0:
                         continue
                     # create a CB
-                    cb = CB(port_node, self.feature_addr_size, self.config_data_width, debug=self.debug)
+                    cb = _create_cb(port_node, self.feature_addr_size, self.config_data_width)
                     self.add_feature(f"CB_{port_name}", cb)
                     self.cbs[port_name] = cb
                 else:
@@ -484,8 +498,8 @@ class TileCircuit(ReadyValidGenerator):
     def __create_sb(self):
         for bit_width, tile in self.tiles.items():
             core_name = self.core.name if self.core is not None else ""
-            sb = SB(tile.switchbox, self.feature_addr_size, self.config_data_width,
-                    core_name, debug=self.debug)
+            sb = _create_sb(tile.switchbox, self.feature_addr_size, self.config_data_width,
+                            core_name)
             self.add_feature(sb.name, sb)
             self.sbs[sb.switchbox.width] = sb
 
@@ -585,8 +599,6 @@ class TileCircuit(ReadyValidGenerator):
             assert switchbox.switchbox.y == self.y
             for sb in sbs:
                 sb_name = create_name(str(sb))
-                node, mux = switchbox.sb_muxs[str(sb)]
-                assert node == sb
                 assert sb.x == self.x
                 assert sb.y == self.y
                 port: _kratos.Port = switchbox.ports[sb_name]
