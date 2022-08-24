@@ -19,7 +19,7 @@ def check_verilog(mod, filename):
     options = kratos.SystemVerilogCodeGenOptions()
     # iverilog doesn't like unique case
     options.unique_case = False
-    kratos.verilog(mod, filename=filename, codegen_options=options)
+    kratos.verilog(mod, filename=filename, codegen_options=options, collect_pass_perf=True)
     subprocess.check_call(["iverilog", os.path.basename(filename), "-g2012"], cwd=os.path.dirname(filename),
                           stdout=None)
 

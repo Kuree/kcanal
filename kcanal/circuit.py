@@ -103,22 +103,6 @@ class SB(Configurable):
         self.__create_sb_mux()
         self.__create_regs()
         self.__create_reg_mux()
-        # connect internal sbs
-        self.__connect_sbs()
-
-        # connect regs and reg muxs
-        # we need to make three connections in total
-        #      REG
-        #  1 /    \ 3
-        # SB ______ MUX
-        #       2
-        self.__connect_sb_out()
-        self.__connect_regs()
-
-        self.__connect_sb_in()
-
-        self.__add_config_reg()
-        self.__handle_reg_clk_en()
 
         self.__lift_ports()
         self.__handle_port_connection()
@@ -361,6 +345,25 @@ class SB(Configurable):
             en = self.var(create_name(str(rmux)) + "_clk_en", 1)
             self.wire(en, (config_reg == index_val) & self.clk_en)
             self.wire(reg.clk_en, kratos.clock_en(en))
+
+    def finalize(self):
+        # connect internal sbs
+        self.__connect_sbs()
+
+        # connect regs and reg muxs
+        # we need to make three connections in total
+        #      REG
+        #  1 /    \ 3
+        # SB ______ MUX
+        #       2
+        self.__connect_sb_out()
+        self.__connect_regs()
+
+        self.__connect_sb_in()
+        self.__add_config_reg()
+        self.__handle_reg_clk_en()
+
+        super(SB, self).finalize()
 
 
 class TileCircuit(ReadyValidGenerator):
@@ -649,12 +652,13 @@ class TileCircuit(ReadyValidGenerator):
             self.add_feature(core.name, core)
 
     def finalize(self):
+        for feat in self.features:
+            feat.finalize()
+
         self.__wire_cb()
         self.__connect_cb_sb()
         self.__connect_core()
 
-        for feat in self.features:
-            feat.finalize()
         # set up config addr
         for feat_addr, feat in enumerate(self.features):
             en = self.var(feat.instance_name + "_en", 1)
