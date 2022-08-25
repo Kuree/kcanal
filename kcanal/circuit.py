@@ -429,8 +429,6 @@ class TileCircuit(ReadyValidGenerator):
         self.__add_cores()
         self.__create_cb()
         self.__create_sb()
-        self.__lift_ports()
-        self.__lift_internal_ports()
 
         self.__setup_tile_id()
 
@@ -591,6 +589,10 @@ class TileCircuit(ReadyValidGenerator):
                 self.wire(loopback, self.__get_core_port(valid_name))
                 self.wire(sb_circuit.ports[valid_name], loopback)
                 self.wire(self.__get_core_port(ready_name), merge)
+
+    def lift_ports(self):
+        self.__lift_ports()
+        self.__lift_internal_ports()
 
     def __lift_ports(self):
         for _, switchbox in self.sbs.items():

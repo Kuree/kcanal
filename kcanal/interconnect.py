@@ -60,10 +60,18 @@ class Interconnect(ReadyValidGenerator):
         self.y_min, self.y_max = y_min, y_max
 
         # create individual tile circuits
+        unique_tiles: Dict[str, TileCircuit] = {}
         for coord, tiles in self.__tiles.items():
             tile = TileCircuit(tiles, config_addr_width, config_data_width,
                                tile_id_width=tile_id_width, full_config_addr_width=full_config_addr_width)
             self.tile_circuits[coord] = tile
+            if tile.name in unique_tiles:
+                ref = unique_tiles[tile.name]
+                tile.internal_generator.copy_over_missing_ports(ref.internal_generator)
+                tile.internal_generator.set_clone_ref(ref.internal_generator)
+            else:
+                tile.lift_ports()
+                unique_tiles[tile.name] = tile
             x, y = coord
             self.add_child("Tile_X{0:02X}Y{1:02X}".format(x, y), tile)
 
