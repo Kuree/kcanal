@@ -1,13 +1,16 @@
 import kratos
 import os
 import subprocess
-from kratos import Generator, posedge, always, initial, negedge
+from kratos import Generator, posedge, always, initial, negedge, SystemVerilogCodeGenOptions
 from kratos.func import task
 from kratos.tb import delay
 from kratos.util import clock, async_reset
 
 
 class Tester(Generator):
+    # disable pytest collection
+    __test__ = False
+
     def __init__(self, config_addr_width, config_data_width):
         super(Tester, self).__init__("TOP")
         self.clk = self.var("clk", 1)
@@ -68,7 +71,10 @@ class Tester(Generator):
         self.config_en = 0
 
     def run(self, filename):
-        kratos.verilog(self, filename=filename, check_multiple_driver=False)
+        # disable the usage of unique
+        option = SystemVerilogCodeGenOptions()
+        option.unique_case = False
+        kratos.verilog(self, filename=filename, check_multiple_driver=False, codegen_options=option)
         working_dir = os.path.dirname(filename)
         subprocess.check_call(["iverilog", os.path.basename(filename), "-g2012", "-o", "test"], cwd=working_dir)
         subprocess.check_call(["./test"], cwd=working_dir)
