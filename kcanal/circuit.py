@@ -66,6 +66,13 @@ def _create_reg(width) -> FIFO:
     return reg
 
 
+def _get_mux_sel_name(node: Node):
+    name = create_name(str(node))
+    sel = f"{name}_sel"
+    en = f"{name}_en"
+    return sel, en
+
+
 class CB(Configurable):
     def __init__(self, node: PortNode, config_addr_width: int, config_data_width: int, debug: bool = False):
         self.node = node
@@ -75,8 +82,9 @@ class CB(Configurable):
         self.mux = _create_mux(node)
         self.in_ = self.input("I", self.width, size=[self.mux.height], packed=True)
         self.out_ = self.output("O", self.width)
-        self.sel = self.add_config("sel", self.mux.sel.width)
-        self.en = self.add_config("en", self.mux.en.width)
+        sel, en = _get_mux_sel_name(node)
+        self.sel = self.add_config(sel, self.mux.sel.width)
+        self.en = self.add_config(en, self.mux.en.width)
         self.valid_in = self.port_from_def(self.mux.valid_in)
         self.valid_out = self.port_from_def(self.mux.valid_out)
         self.ready_in = self.port_from_def(self.mux.ready_in)
@@ -315,16 +323,9 @@ class SB(Configurable):
             self.wire(merge, kratos.util.reduce_or(*merge_vars))
             self.wire(sb_mux.ready_in, merge)
 
-    @staticmethod
-    def get_mux_sel_name(node: Node):
-        name = create_name(str(node))
-        sel = f"{name}_sel"
-        en = f"{name}_en"
-        return sel, en
-
     def __add_config_reg(self):
         for _, (sb, mux) in self.sb_muxs.items():
-            config_name, en = self.get_mux_sel_name(sb)
+            config_name, en = _get_mux_sel_name(sb)
             if mux.height > 1:
                 self.add_config(config_name, mux.sel.width)
                 self.wire(self.registers[config_name], mux.sel)
@@ -333,7 +334,7 @@ class SB(Configurable):
                 self.wire(self.registers[en], mux.en)
 
         for _, (reg_mux, mux) in self.reg_muxs.items():
-            config_name, en = self.get_mux_sel_name(reg_mux)
+            config_name, en = _get_mux_sel_name(reg_mux)
             assert mux.height == 2
             self.add_config(config_name, mux.sel.width)
             self.wire(self.registers[config_name], mux.sel)
@@ -346,7 +347,7 @@ class SB(Configurable):
         for (reg_node, reg) in self.regs.values():
             rmux: RegisterMuxNode = list(reg_node)[0]
             # get rmux address
-            config_name, _ = self.get_mux_sel_name(rmux)
+            config_name, _ = _get_mux_sel_name(rmux)
             config_reg = self.registers[config_name]
             index_val = rmux.get_conn_in().index(reg_node)
             en = self.var(create_name(str(rmux)) + "_clk_en", 1)
@@ -431,6 +432,8 @@ class TileCircuit(ReadyValidGenerator):
         self.__create_sb()
 
         self.__setup_tile_id()
+
+        self.__port_lifted = False
 
     def __setup_tile_cores(self, tiles):
         x = -1
@@ -593,6 +596,7 @@ class TileCircuit(ReadyValidGenerator):
     def lift_ports(self):
         self.__lift_ports()
         self.__lift_internal_ports()
+        self.__port_lifted = True
 
     def __lift_ports(self):
         for _, switchbox in self.sbs.items():
@@ -666,6 +670,12 @@ class TileCircuit(ReadyValidGenerator):
             self.add_feature(core.name, core)
 
     def finalize(self):
+        if self.is_cloned:
+            return
+
+        if not self.__port_lifted:
+            self.lift_ports()
+
         for feat in self.features:
             feat.finalize()
 
@@ -690,6 +700,39 @@ class TileCircuit(ReadyValidGenerator):
             if port_name in core.ports:
                 return core.ports[port_name]
         return None
+
+    __CONFIG_TYPE = Tuple[int, int, int]
+    __BITSTREAM_TYPE = Union[__CONFIG_TYPE, List[__CONFIG_TYPE]]
+
+    def get_route_bitstream_config(self, src_node: Node, dst_node: Node,
+                                   ready_valid: bool = False) -> __BITSTREAM_TYPE:
+        assert src_node.width == dst_node.width
+        tile = self.tiles[src_node.width]
+        assert dst_node.x == tile.x and dst_node.y == tile.y, \
+            f"{dst_node} is not in {tile}"
+        assert dst_node in src_node, \
+            f"{dst_node} is not connected to {src_node}"
+
+        config_data = dst_node.get_conn_in().index(src_node)
+        # find the circuit
+        if isinstance(dst_node, SwitchBoxNode):
+            circuit = self.sbs[src_node.width]
+        elif isinstance(dst_node, PortNode):
+            circuit = self.cbs[dst_node.name]
+        elif isinstance(dst_node, RegisterMuxNode):
+            circuit = self.sbs[src_node.width]
+        else:
+            raise NotImplementedError(type(dst_node))
+        sel_name, en_name = _get_mux_sel_name(dst_node)
+        configs = []
+        reg_idx, config_data = circuit.get_config_data(sel_name, config_data)
+        feature_addr = self.features.index(circuit)
+        configs.append((reg_idx, feature_addr, config_data))
+        reg_idx, config_data = circuit.get_config_data(en_name, 1)
+        feature_addr = self.features.index(circuit)
+        config_data.append((reg_idx, feature_addr, config_data))
+
+        return config_data
 
 
 if __name__ == "__main__":

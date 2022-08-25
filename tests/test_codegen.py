@@ -108,6 +108,7 @@ def test_tile_codegen():
         check_verilog(tile_circuit, filename)
 
 
+@pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
 def test_interconnect_codegen():
     addr_width = 8
     data_width = 32

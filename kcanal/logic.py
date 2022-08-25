@@ -201,6 +201,10 @@ class Configurable(ReadyValidGenerator):
         self.config_data = self.input("config_data", config_data_width)
         self.config_en = self.input("config_en", 1)
 
+        # register map
+        # index, low, high
+        self.__register_map: Dict[str, Tuple[int, int, int]] = {}
+
     def add_config(self, name: str, width: int):
         assert name not in self.registers, f"{name} already exists in configuration"
         v = self.var(name, width)
@@ -228,6 +232,7 @@ class Configurable(ReadyValidGenerator):
             lo: int = start_addr
             slice_ = registers[idx].value[hi, lo]
             self.wire(v, slice_)
+            self.__register_map[name] = (idx, lo, hi)
 
     def __compute_reg_packing(self):
         # greedy bin packing
@@ -259,6 +264,12 @@ class Configurable(ReadyValidGenerator):
             place(name, v)
 
         return regs, reg_map
+
+    def get_config_data(self, name, value):
+        idx, lo, hi = self.__register_map[name]
+        width = hi - lo + 1
+        assert value < (1 << width)
+        return idx, value << lo
 
 
 class FIFO(Generator):
