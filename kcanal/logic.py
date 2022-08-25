@@ -265,7 +265,7 @@ class Configurable(ReadyValidGenerator):
 
         return regs, reg_map
 
-    def get_config_data(self, name, value):
+    def get_config_data(self, name, value) -> Tuple[int, int]:
         idx, lo, hi = self.__register_map[name]
         width = hi - lo + 1
         assert value < (1 << width)

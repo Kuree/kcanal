@@ -73,6 +73,10 @@ def _get_mux_sel_name(node: Node):
     return sel, en
 
 
+_CONFIG_TYPE = Tuple[int, int, int]
+_BITSTREAM_TYPE = Union[_CONFIG_TYPE, List[_CONFIG_TYPE]]
+
+
 class CB(Configurable):
     def __init__(self, node: PortNode, config_addr_width: int, config_data_width: int, debug: bool = False):
         self.node = node
@@ -94,6 +98,13 @@ class CB(Configurable):
         self.add_child("mux", self.mux,
                        I=self.in_, O=self.out_, S=self.sel, valid_in=self.valid_in, valid_out=self.valid_out,
                        ready_in=self.ready_in, ready_out=self.ready_out, enable=self.en, sel_out=self.sel_out)
+
+    def get_route_bitstream_config(self, node: Node):
+        assert node in self.node.get_conn_in()
+        sel_name, en_name = _get_mux_sel_name(self.node)
+        idx = self.node.get_conn_in().index(node)
+        config_data = [self.get_config_data(sel_name, idx), self.get_config_data(en_name, 1)]
+        return config_data
 
 
 def _create_cb(node: PortNode, config_addr_width: int, config_data_width: int) -> CB:
@@ -701,11 +712,7 @@ class TileCircuit(ReadyValidGenerator):
                 return core.ports[port_name]
         return None
 
-    __CONFIG_TYPE = Tuple[int, int, int]
-    __BITSTREAM_TYPE = Union[__CONFIG_TYPE, List[__CONFIG_TYPE]]
-
-    def get_route_bitstream_config(self, src_node: Node, dst_node: Node,
-                                   ready_valid: bool = False) -> __BITSTREAM_TYPE:
+    def get_route_bitstream_config(self, src_node: Node, dst_node: Node) -> _BITSTREAM_TYPE:
         assert src_node.width == dst_node.width
         tile = self.tiles[src_node.width]
         assert dst_node.x == tile.x and dst_node.y == tile.y, \

@@ -240,6 +240,27 @@ class DummyCore(Core):
             self.wire(self.ports[f"out{i}_valid"], self.ports[f"in{i}_valid"])
 
 
+def write_bitstream(config_data, filename):
+    with open(filename, "w+") as f:
+        for addr, data in config_data:
+            f.write("{0:08X} {1:08X}\n".format(addr, data))
+
+
+def merge_bitstream(config_data):
+    res = {}
+    for addr, data in config_data:
+        if addr in res:
+            v = res[addr]
+            v |= data
+            res[addr] = v
+        else:
+            res[addr] = data
+    result = []
+    for addr, data in res.items():
+        result.append((addr, data))
+    return result
+
+
 if __name__ == "__main__":
     import kratos
     mod = DummyCore(8, 32)
