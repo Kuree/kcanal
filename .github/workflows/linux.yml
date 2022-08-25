@@ -1,0 +1,43 @@
+name: CI Test
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Setup Python environment 🐍
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Display Python version 🐍
+      run: python -c "import sys; print(sys.version)"
+    - name: Install iverilog 📁
+      run: sudo apt-get install iverilog
+    - name: Install deps 🛠️
+      shell: bash
+      run: |
+        pip install -e .[test]
+    - name: Run tests ⚙️
+      shell: bash
+      run: |
+        pytest tests/ -v
+    - name: Build Python wheel 🎡
+      shell: bash
+      run: |
+        pip3 install wheel
+        python3 setup.py bdist_wheel
+    - name: Upload artifact 🛖
+      uses: actions/upload-artifact@v2
+      with:
+        name: Python Wheel
+        path: dist/
+    - name: Publish distribution 📦 to PyPI
+      if: startsWith(github.ref, 'refs/tags')
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        user: keyi
+        password: ${{ secrets.PYPI_PASSWORD }}
+        skip_existing: true
