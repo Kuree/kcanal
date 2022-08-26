@@ -1,15 +1,17 @@
 from kcanal import CB
 from kratos import initial, delay, assert_
+from kratos.func import task
 from kratos.util import finish, fopen, fscanf, urandom
 from kcanal.cyclone import PortNode, SwitchBoxNode, SwitchBoxSide, SwitchBoxIO
 from kcanal.tester import Tester
 from kcanal.util import write_bitstream, merge_bitstream
 
+
 import tempfile
 import os
 
 
-def test_cb():
+def test_cb_data():
     width = 16
     num_nodes = 10
     config_addr_size = 8
@@ -24,37 +26,43 @@ def test_cb():
 
     cb = CB(port, config_addr_size, config_data_size)
     cb.finalize()
-    idx = 4
-    configs = cb.get_route_bitstream_config(nodes[idx])
-    configs = merge_bitstream(configs)
-    num_configs = len(configs)
 
     with tempfile.TemporaryDirectory() as temp:
-        bs_filename = os.path.join(temp, "config_data.bs")
-        write_bitstream(configs, bs_filename)
+        temp = "temp"
+        for idx in range(len(nodes)):
+            configs = cb.get_route_bitstream_config(nodes[idx])
+            configs = merge_bitstream(configs)
+            num_configs = len(configs)
+            bs_filename = os.path.join(temp, f"config_data{idx}.bs")
+            write_bitstream(configs, bs_filename)
 
         class CBTester(Tester):
             def __init__(self):
                 super(CBTester, self).__init__(config_addr_size, config_data_size)
                 self.value = self.var("value", 32)
                 self.add_dut(cb)
-                self.bs_filename = os.path.basename(bs_filename)
+                self.bs_filename = "config_data{0}.bs"
                 self.num_config = num_configs
-                self.add_code(self.test_body)
+                self.add_code(self.test_body, unroll_for=True)
 
-            @initial
-            def test_body(self):
+            @task
+            def test_config(self):
                 self.reset()
-                self.fd = fopen(self.bs_filename, "r")
+                self.fd = fopen(self.bs_filename.format(idx), "r")
                 for i in range(self.num_config):
                     self.scanf_read = fscanf(self.fd, "%08h %08h", self.config_addr, self.config_data)
                     self.configure(self.config_addr, self.config_data)
 
                 self.value = urandom() % 0xFFFF
                 self.vars.I[idx] = self.value[15, 0]
-                delay(0, None)
+                delay(1, None)
                 assert_(self.vars.O == self.value)
 
+            @initial
+            def test_body(self):
+                for i in range(len(nodes)):
+                    # overwrite the name and inject local variables
+                    self.test_config(idx=i, name=f"test_config{i}")
                 finish()
 
         tester = CBTester()
@@ -64,4 +72,4 @@ def test_cb():
 
 
 if __name__ == "__main__":
-    test_cb()
+    test_cb_data()
