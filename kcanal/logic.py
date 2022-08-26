@@ -43,7 +43,7 @@ class Mux(Generator):
     def __init__(self, height: int, width: int, is_clone: bool = False):
         name = "Mux_{0}".format(height)
         super().__init__(name, is_clone=is_clone)
-        self.width = self.param("width", value=width, initial_value=2)
+        self.width = self.param("width", value=width, initial_value=16)
 
         if height < 1:
             height = 1
@@ -85,6 +85,80 @@ class Mux(Generator):
         self.wire(self.out_, functools.reduce(operator.or_, temp_vars))
         self.wire(self.valid_out, (self.valid_in & self.sel_out).r_or())
         self.wire(self.ready_out, self.ready_in.duplicate(height))
+
+
+class MuxCase(Generator):
+    def __init__(self, height: int, width: int, is_clone: bool = False):
+        name = "Mux_{0}".format(height)
+        super().__init__(name, is_clone=is_clone)
+        self.width = self.param("width", value=width, initial_value=16)
+
+        if height < 1:
+            height = 1
+        self.height = height
+
+        self.in_ = self.input("I", self.width, size=[height], packed=True)
+        self.out_ = self.output("O", self.width)
+        self.valid_in = self.input("valid_in", height)
+        self.valid_out = self.output("valid_out", 1)
+        self.ready_in = self.input("ready_in", 1)
+        self.ready_out = self.output("ready_out", height)
+
+        self.en = self.input("enable", 1)
+
+        sel_size = clog2(height)
+        self.sel = self.input("S", sel_size)
+
+        decoder = OneHotDecoder(height)
+        self.sel_out = self.output("sel_out", height)
+        self.sel_out_temp = self.var("sel_out_temp", height)
+        self.wire(self.sel_out, kratos.ternary(self.en, self.sel_out_temp, 0))
+        self.out_temp = self.var("out_temp", width)
+        self.wire(self.out_, kratos.ternary(self.en, self.out_temp, 0))
+        self.valid_out_temp = self.var("valid_out_temp", 1)
+        self.wire(self.valid_out, kratos.ternary(self.en, self.valid_out_temp, 0))
+        self.wire(self.ready_out, self.ready_in.duplicate(height))
+
+        comb = self.combinational()
+        case = comb.switch_(self.sel)
+        for i in range(height):
+            case.case_(i, self.out_temp.assign(self.in_[i]), self.sel_out_temp.assign(1 << i),
+                       self.valid_out_temp.assign(self.valid_in[i]))
+        case.case_(None, self.out_temp.assign(0), self.sel_out_temp.assign(0), self.valid_out_temp.assign(0))
+
+
+class MuxSlim(Generator):
+    def __init__(self, height: int, width: int, is_clone: bool = False):
+        name = "Mux_{0}".format(height)
+        super().__init__(name, is_clone=is_clone)
+        self.width = self.param("width", value=width, initial_value=16)
+
+        if height < 1:
+            height = 1
+        self.height = height
+
+        self.in_ = self.input("I", self.width, size=[height], packed=True)
+        self.out_ = self.output("O", self.width)
+        self.valid_in = self.input("valid_in", height)
+        self.valid_out = self.output("valid_out", 1)
+        self.ready_in = self.input("ready_in", 1)
+        self.ready_out = self.output("ready_out", height)
+
+        self.en = self.input("enable", 1)
+
+        sel_size = clog2(height)
+        self.sel = self.input("S", sel_size)
+
+        self.sel_out = self.output("sel_out", height)
+        self.sel_out_temp = self.var("sel_out_temp", height)
+        self.wire(self.sel_out, kratos.ternary(self.en, self.sel_out_temp, 0))
+        self.out_temp = self.var("out_temp", width)
+        self.wire(self.out_, kratos.ternary(self.en, self.out_temp, 0))
+        self.valid_out_temp = self.var("valid_out_temp", 1)
+        self.wire(self.valid_out, kratos.ternary(self.en, self.valid_out_temp, 0))
+        self.wire(self.ready_out, self.ready_in.duplicate(height))
+        self.wire(self.valid_out_temp, self.valid_in[self.sel])
+        self.wire(self.out_temp, self.in_[self.sel])
 
 
 class ConfigRegister(Generator):
@@ -364,5 +438,10 @@ class FIFO(Generator):
 if __name__ == "__main__":
     import kratos
 
-    fifo = FIFO(16, 10)
-    kratos.verilog(fifo, filename="test.sv")
+    m = Mux(10, 16)
+    kratos.verilog(m, filename="mux.sv", check_combinational_loop=False)
+    m = MuxCase(10, 16)
+    m.width.value = 16
+    kratos.verilog(m, filename="mux_case.sv", check_combinational_loop=False)
+    m = MuxSlim(10, 16)
+    kratos.verilog(m, filename="mux_slim.sv", check_combinational_loop=False)
