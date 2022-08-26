@@ -1,7 +1,7 @@
 from kcanal import CB
 from kratos import initial, delay, assert_
 from kratos.func import task
-from kratos.util import finish, fopen, fscanf, urandom
+from kratos.util import finish, fopen, fscanf, urandom, fclose
 from kcanal.cyclone import PortNode, SwitchBoxNode, SwitchBoxSide, SwitchBoxIO
 from kcanal.tester import Tester
 from kcanal.util import write_bitstream, merge_bitstream
@@ -52,11 +52,14 @@ def test_cb_data():
                 for i in range(self.num_config):
                     self.scanf_read = fscanf(self.fd, "%08h %08h", self.config_addr, self.config_data)
                     self.configure(self.config_addr, self.config_data)
+                fclose(self.fd)
 
-                self.value = urandom() % 0xFFFF
-                self.vars.I[idx] = self.value[15, 0]
-                delay(1, None)
-                assert_(self.vars.O == self.value)
+                # test it 42 times
+                for i in range(42):
+                    self.value = urandom() % 0xFFFF
+                    self.vars.I[idx] = self.value[15, 0]
+                    delay(1, None)
+                    assert_(self.vars.O == self.value)
 
             @initial
             def test_body(self):
