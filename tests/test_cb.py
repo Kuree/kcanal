@@ -9,9 +9,10 @@ from kcanal.util import write_bitstream, merge_bitstream
 
 import tempfile
 import os
+import random
 
 
-def test_cb_data():
+def setup_cb():
     width = 16
     num_nodes = 10
     config_addr_size = 8
@@ -26,9 +27,12 @@ def test_cb_data():
 
     cb = CB(port, config_addr_size, config_data_size)
     cb.finalize()
+    return cb, nodes
 
+
+def test_cb_data():
+    cb, nodes = setup_cb()
     with tempfile.TemporaryDirectory() as temp:
-        temp = "temp"
         for idx in range(len(nodes)):
             configs = cb.get_route_bitstream_config(nodes[idx])
             configs = merge_bitstream(configs)
@@ -38,7 +42,7 @@ def test_cb_data():
 
         class CBTester(Tester):
             def __init__(self):
-                super(CBTester, self).__init__(config_addr_size, config_data_size)
+                super(CBTester, self).__init__(cb.config_addr_width, cb.config_data_width)
                 self.value = self.var("value", 32)
                 self.add_dut(cb)
                 self.bs_filename = "config_data{0}.bs"
@@ -74,5 +78,48 @@ def test_cb_data():
         tester.run(filename)
 
 
+def test_cb_disable():
+    cb, nodes = setup_cb()
+    with tempfile.TemporaryDirectory() as temp:
+        idx = random.randint(0, len(nodes) - 1)
+        configs = cb.get_route_bitstream_config(nodes[idx])
+        # don't need enable
+        configs = configs[:1]
+        bs_filename = os.path.join(temp, f"config_data.bs")
+        write_bitstream(configs, bs_filename)
+
+        class CBTester(Tester):
+            def __init__(self):
+                super(CBTester, self).__init__(cb.config_addr_width, cb.config_data_width)
+                self.value = self.var("value", 32)
+                self.add_dut(cb)
+                self.bs_filename = "config_data.bs"
+                self.num_config = 1
+                self.add_code(self.test_body)
+
+            @initial
+            def test_body(self):
+                self.reset()
+                self.fd = fopen(self.bs_filename, "r")
+                self.scanf_read = fscanf(self.fd, "%08h %08h", self.config_addr, self.config_data)
+                self.configure(self.config_addr, self.config_data)
+                fclose(self.fd)
+
+                # test it 42 times
+                for i in range(42):
+                    self.value = urandom() % 0xFFFF
+                    self.vars.I[idx] = self.value[15, 0]
+                    delay(1, None)
+                    assert_(self.vars.O == 0)
+                    assert_(self.vars.ready_out == 0)
+                    assert_(self.vars.valid_out == 0)
+                finish()
+
+        tester = CBTester()
+
+        filename = os.path.join(temp, "test.sv")
+        tester.run(filename)
+
+
 if __name__ == "__main__":
-    test_cb_data()
+    test_cb_disable()

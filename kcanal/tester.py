@@ -77,4 +77,6 @@ class Tester(Generator):
         kratos.verilog(self, filename=filename, check_multiple_driver=False, codegen_options=option)
         working_dir = os.path.dirname(filename)
         subprocess.check_call(["iverilog", os.path.basename(filename), "-g2012", "-o", "test"], cwd=working_dir)
-        subprocess.check_call(["./test"], cwd=working_dir)
+        out = subprocess.check_output(["./test"], cwd=working_dir, stderr=subprocess.STDOUT)
+        out = out.decode("ascii")
+        assert "ERROR" not in out, out
