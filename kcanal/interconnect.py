@@ -219,7 +219,6 @@ class Interconnect(ReadyValidGenerator):
                         # because the lifted port will conflict with each other
                         # we need to add x and y to the sb_name to avoid conflict
                         new_sb_name = sb_name + f"_X{x}_Y{y}"
-                        print(new_sb_name)
                         self.lift_rv(sb_port, new_sb_name)
                     else:
                         # make sure the connected nodes doesn't have any nodes
@@ -329,7 +328,7 @@ class Interconnect(ReadyValidGenerator):
             cores = [tile.core] + tile.additional_cores
             for core in cores:
                 info = core.pnr_info()
-                core_name = core.name()
+                core_name = core.name
                 if core_name not in result:
                     result[core_name] = info
                 else:
@@ -397,7 +396,7 @@ class Interconnect(ReadyValidGenerator):
                             else:
                                 tile = self.tile_circuits[coord]
                                 cores = [tile.core] + tile.additional_cores
-                                core_names = [core.name() for core in cores]
+                                core_names = [core.name for core in cores]
                                 if core_name not in core_names:
                                     f.write("0")
                                 else:

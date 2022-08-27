@@ -88,7 +88,6 @@ def test_tile_codegen():
         tile.set_core(core)
 
         input_port_name = f"in{bit_width}"
-        input_port_name_extra = f"data_in_{bit_width}b_extra"
         output_port_name = f"out{bit_width}"
 
         tile.set_core_connection(input_port_name, input_connections)
@@ -102,53 +101,14 @@ def test_tile_codegen():
         check_verilog(tile_circuit, filename)
 
 
-def test_interconnect_codegen():
-    addr_width = 8
-    data_width = 32
-    bit_widths = [1, 16]
-    tile_id_width = 16
-    track_length = 1
+def test_interconnect_codegen(create_dummy_interconnect):
     chip_size = 2
-    num_tracks = 5
-    # creates all the cores here
-    # we don't want duplicated cores when snapping into different interconnect
-    # graphs
-    cores = {}
-    core_type = DummyCore
-    for x in range(chip_size):
-        for y in range(chip_size):
-            cores[(x, y)] = core_type()
-
-    def create_core(xx: int, yy: int):
-        return cores[(xx, yy)]
-
-    in_conn = []
-    out_conn = []
-    for side in SwitchBoxSide:
-        in_conn.append((side, SwitchBoxIO.SB_IN))
-        out_conn.append((side, SwitchBoxIO.SB_OUT))
-    pipeline_regs = []
-    for track in range(num_tracks):
-        for side in SwitchBoxSide:
-            pipeline_regs.append((track, side))
-    ics = {}
-    for bit_width in bit_widths:
-        ic = create_uniform_interconnect(chip_size, chip_size, bit_width,
-                                         create_core,
-                                         {f"in{bit_width}": in_conn,
-                                          f"out{bit_width}": out_conn},
-                                         {track_length: num_tracks},
-                                         SwitchBoxType.Disjoint,
-                                         pipeline_regs)
-        ics[bit_width] = ic
-    interconnect = Interconnect(ics, addr_width, data_width, tile_id_width,
-                                lift_ports=True)
-    # finalize the design
-    interconnect.finalize()
+    interconnect = create_dummy_interconnect(chip_size, chip_size)
     with tempfile.TemporaryDirectory() as temp:
         filename = os.path.join(temp, "interconnect.sv")
         check_verilog(interconnect, filename)
 
 
 if __name__ == "__main__":
-    test_interconnect_codegen()
+    from conftest import create_dummy_interconnect_fn
+    test_interconnect_codegen(create_dummy_interconnect_fn)

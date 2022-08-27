@@ -35,7 +35,7 @@ class Core(Configurable, InterconnectCore):
         return p, r, v
 
     def pnr_info(self) -> Union[PnRTag, List[PnRTag]]:
-        tag = self.name()[0]
+        tag = self.name[0]
         priority_major = PnRTag.DEFAULT_PRIORITY
         priority_minor = PnRTag.DEFAULT_PRIORITY
         # this can be a list as well
