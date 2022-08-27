@@ -7,12 +7,9 @@ from kcanal.cyclone import PortNode, Node, ImranSwitchBox, DisjointSwitchBox, Ti
     SBConnectionType, SwitchBox
 
 import kratos
-import shutil
 import tempfile
 import pytest
 import os
-
-iverilog_available = shutil.which("iverilog") is not None
 
 
 def check_verilog(mod, filename):
@@ -30,7 +27,6 @@ def insert_pipeline_registers(sb: SwitchBox):
             sb.add_pipeline_register(side, track)
 
 
-@pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
 def test_cb_codegen():
     node = PortNode("test", 0, 0, 16)
     for _ in range(5):
@@ -43,7 +39,6 @@ def test_cb_codegen():
         check_verilog(cb, filename)
 
 
-@pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
 @pytest.mark.parametrize("insert_pipline", [True, False])
 def test_sb_codegen(insert_pipline):
     switchbox = ImranSwitchBox(0, 0, 2, 1)
@@ -70,7 +65,6 @@ def get_in_out_connections(num_tracks):
     return input_connections, output_connections
 
 
-@pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
 def test_tile_codegen():
     x, y = 0, 0
     tiles = {}
@@ -108,7 +102,6 @@ def test_tile_codegen():
         check_verilog(tile_circuit, filename)
 
 
-@pytest.mark.skipif(not iverilog_available, reason="iverilog not available")
 def test_interconnect_codegen():
     addr_width = 8
     data_width = 32

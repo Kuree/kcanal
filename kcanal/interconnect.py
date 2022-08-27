@@ -201,54 +201,36 @@ class Interconnect(ReadyValidGenerator):
                                 raise NotImplemented("Fanout on margin tile not supported. Use a SB instead")
 
     def __lift_ports(self):
-        # we assume it's a rectangular grid
-        # we only care about the perimeter
-        x_range = {self.x_min, self.x_max}
-        y_range = {self.y_min, self.y_max}
-        coordinates = []
-        for (x, y) in self.tile_circuits:
-            if x in x_range or y in y_range:
-                coord = (x, y)
-                if coord not in coordinates:
-                    coordinates.append((x, y))
-        for x, y in coordinates:
+        for coord, tile_dict in self.__tiles.items():
+            x, y = coord
             tile = self.tile_circuits[(x, y)]
             # we only lift sb ports
             sbs = tile.sbs
             for bit_width, switchbox in sbs.items():
                 all_sbs = switchbox.switchbox.get_all_sbs()
-                working_set = []
-                if x == self.x_min:
-                    # we lift west/left ports
-                    for sb_node in all_sbs:
-                        if sb_node.side != SwitchBoxSide.WEST:
+                for sb in all_sbs:
+                    sb_name = create_name(str(sb))
+                    sb_port = self.tile_circuits[coord].ports[sb_name]
+                    if sb.io == SwitchBoxIO.SB_IN:
+                        if len(sb.get_conn_in()) > 0:
                             continue
-                        working_set.append(sb_node)
-                if x == self.x_max:
-                    # we lift east/right ports
-                    for sb_node in all_sbs:
-                        if sb_node.side != SwitchBoxSide.EAST:
-                            continue
-                        working_set.append(sb_node)
-                if y == self.y_min:
-                    # we lift north/top ports
-                    for sb_node in all_sbs:
-                        if sb_node.side != SwitchBoxSide.NORTH:
-                            continue
-                        working_set.append(sb_node)
-                if y == self.y_max:
-                    # we lift south/bottom ports
-                    for sb_node in all_sbs:
-                        if sb_node.side != SwitchBoxSide.SOUTH:
-                            continue
-                        working_set.append(sb_node)
-                for sb_node in working_set:
-                    sb_name = create_name(str(sb_node))
-                    sb_port = tile.ports[sb_name]
-                    # because the lifted port will conflict with each other
-                    # we need to add x and y to the sb_name to avoid conflict
-                    new_sb_name = sb_name + f"_X{sb_node.x}_Y{sb_node.y}"
-                    self.lift_rv(sb_port, new_sb_name)
+                        # because the lifted port will conflict with each other
+                        # we need to add x and y to the sb_name to avoid conflict
+                        new_sb_name = sb_name + f"_X{x}_Y{y}"
+                        print(new_sb_name)
+                        self.lift_rv(sb_port, new_sb_name)
+                    else:
+                        # make sure the connected nodes doesn't have any nodes
+                        # need to bypass rmux if possible
+                        connected = False
+                        for node in sb:
+                            for n in node:
+                                if n.x != x or n.y != y:
+                                    connected = True
+                                    break
+                        if not connected:
+                            new_sb_name = sb_name + f"_X{x}_Y{y}"
+                            self.lift_rv(sb_port, new_sb_name)
 
     def __ground_ports(self):
         # this is a pass to ground every sb ports that's not connected

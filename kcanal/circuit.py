@@ -737,9 +737,9 @@ class TileCircuit(ReadyValidGenerator):
         configs.append((reg_idx, feature_addr, config_data))
         reg_idx, config_data = circuit.get_config_data(en_name, 1)
         feature_addr = self.features.index(circuit)
-        config_data.append((reg_idx, feature_addr, config_data))
+        configs.append((reg_idx, feature_addr, config_data))
 
-        return config_data
+        return configs
 
 
 if __name__ == "__main__":
