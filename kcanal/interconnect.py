@@ -4,8 +4,10 @@ from .cyclone import InterconnectGraph, Tile, SwitchBoxIO, Node, SwitchBoxNode, 
     SwitchBoxSide
 from .circuit import TileCircuit
 from .logic import ReadyValidGenerator
+from .pnr import PnRTag
 
 import kratos
+import os
 
 
 class Interconnect(ReadyValidGenerator):
@@ -294,3 +296,147 @@ class Interconnect(ReadyValidGenerator):
                 self.wire(self.config_data, tile_circuit.config_data)
             tile_circuit.finalize()
             definition_tiles[tile_circuit.name] = tile_circuit
+
+    # software interaction
+    def dump_pnr(self, dir_name, design_name, max_num_col=None):
+        if not os.path.isdir(dir_name):
+            os.mkdir(dir_name)
+        dir_name = os.path.abspath(dir_name)
+        if max_num_col is None:
+            max_num_col = self.x_max + 1
+
+        graph_path_dict = {}
+        for bit_width, graph in self.__graphs.items():
+            graph_path = os.path.join(dir_name, f"{bit_width}.graph")
+            graph_path_dict[bit_width] = graph_path
+            graph.dump_graph(graph_path, max_num_col)
+
+        # generate the layout file
+        layout_file = os.path.join(dir_name, f"{design_name}.layout")
+        self.__dump_layout_file(layout_file, max_num_col)
+        pnr_file = os.path.join(dir_name, f"{design_name}.info")
+        with open(pnr_file, "w+") as f:
+            f.write(f"layout={layout_file}\n")
+            graph_configs = [f"{bit_width} {graph_path_dict[bit_width]}" for
+                             bit_width in self.__graphs]
+            graph_config_str = " ".join(graph_configs)
+            f.write(f"graph={graph_config_str}\n")
+
+    def __get_core_info(self) -> Dict[str, Tuple[PnRTag, List[PnRTag]]]:
+        result = {}
+        for coord in self.tile_circuits:
+            tile = self.tile_circuits[coord]
+            cores = [tile.core] + tile.additional_cores
+            for core in cores:
+                info = core.pnr_info()
+                core_name = core.name()
+                if core_name not in result:
+                    result[core_name] = info
+                else:
+                    assert result[core_name] == info
+        return result
+
+    @staticmethod
+    def __get_core_tag(core_info):
+        name_to_tag = {}
+        tag_to_name = {}
+        tag_to_priority = {}
+        for core_name, tags in core_info.items():
+            if not isinstance(tags, list):
+                tags = [tags]
+            for tag in tags:  # type: PnRTag
+                tag_name = tag.tag_name
+                if core_name not in name_to_tag:
+                    name_to_tag[core_name] = []
+                name_to_tag[core_name].append(tag.tag_name)
+                assert tag_name not in tag_to_name, f"{tag_name} already exists"
+                tag_to_name[tag_name] = core_name
+                tag_to_priority[tag_name] = (tag.priority_major,
+                                             tag.priority_minor)
+        return name_to_tag, tag_to_name, tag_to_priority
+
+    def __get_registered_tile(self):
+        result = set()
+        for coord, tile_circuit in self.tile_circuits.items():
+            for _, tile in tile_circuit.tiles.items():
+                switchbox = tile.switchbox
+                if len(switchbox.registers) > 0:
+                    result.add(coord)
+                    break
+        return result
+
+    def __dump_layout_file(self, layout_file, max_num_col):
+        # empty tiles first
+        with open(layout_file, "w+") as f:
+            f.write("LAYOUT   0 20\nBEGIN\n")
+            for y in range(self.y_max + 1):
+                for x in range(max_num_col):
+                    coord = (x, y)
+                    if coord not in self.tile_circuits:
+                        f.write("1")
+                    else:
+                        f.write("0")
+                f.write("\n")
+            f.write("END\n")
+            # looping through the tiles to figure what core it has
+            # use default priority 20
+            default_priority = 20
+            core_info = self.__get_core_info()
+            name_to_tag, tag_to_name, tag_to_priority \
+                = self.__get_core_tag(core_info)
+            for core_name, tags in name_to_tag.items():
+                for tag in tags:
+                    priority_major, priority_minor = tag_to_priority[tag]
+                    f.write(f"LAYOUT {tag} {priority_major} {priority_minor}\n")
+                    f.write("BEGIN\n")
+                    for y in range(self.y_max + 1):
+                        for x in range(max_num_col):
+                            coord = (x, y)
+                            if coord not in self.tile_circuits:
+                                f.write("0")
+                            else:
+                                tile = self.tile_circuits[coord]
+                                cores = [tile.core] + tile.additional_cores
+                                core_names = [core.name() for core in cores]
+                                if core_name not in core_names:
+                                    f.write("0")
+                                else:
+                                    f.write("1")
+                        f.write("\n")
+                    f.write("END\n")
+            # handle registers
+            assert "r" not in tag_to_name
+            r_locs = self.__get_registered_tile()
+            f.write(f"LAYOUT r {default_priority} 0\nBEGIN\n")
+            for y in range(self.y_max + 1):
+                for x in range(max_num_col):
+                    if (x, y) in r_locs:
+                        f.write("1")
+                    else:
+                        f.write("0")
+                f.write("\n")
+            f.write("END\n")
+
+    def parse_node(self, node_str):
+        if node_str[0] == "SB":
+            track, x, y, side, io_, bit_width = node_str[1:]
+            graph = self.get_graph(bit_width)
+            return graph.get_sb(x, y, SwitchBoxSide(side), track,
+                                SwitchBoxIO(io_))
+        elif node_str[0] == "PORT":
+            port_name, x, y, bit_width = node_str[1:]
+            graph = self.get_graph(bit_width)
+            return graph.get_port(x, y, port_name)
+        elif node_str[0] == "REG":
+            reg_name, track, x, y, bit_width = node_str[1:]
+            graph = self.get_graph(bit_width)
+            return graph.get_tile(x, y).switchbox.registers[reg_name]
+        elif node_str[0] == "RMUX":
+            rmux_name, x, y, bit_width = node_str[1:]
+            graph = self.get_graph(bit_width)
+            return graph.get_tile(x, y).switchbox.reg_muxs[rmux_name]
+        else:
+            raise Exception("Unknown node " + " ".join(node_str))
+
+    def get_graph(self, bit_width: int):
+        return self.__graphs[bit_width]

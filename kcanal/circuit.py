@@ -1,5 +1,3 @@
-import functools
-
 import kratos
 import _kratos
 
@@ -7,6 +5,7 @@ from typing import List, Dict, Tuple, Union
 from .cyclone import InterconnectCore, PortNode, Node, SwitchBox, RegisterNode, RegisterMuxNode, SwitchBoxNode, \
     SwitchBoxIO, ImranSwitchBox, Tile
 from .logic import Configurable, Mux, FIFO, ReadyValidGenerator
+from .pnr import PnRTag
 
 
 class Core(Configurable, InterconnectCore):
@@ -34,6 +33,13 @@ class Core(Configurable, InterconnectCore):
         p, r, v = Configurable.output_rv(self, port_name, width)
         self._output_ports.append(p)
         return p, r, v
+
+    def pnr_info(self) -> Union[PnRTag, List[PnRTag]]:
+        tag = self.name()[0]
+        priority_major = PnRTag.DEFAULT_PRIORITY
+        priority_minor = PnRTag.DEFAULT_PRIORITY
+        # this can be a list as well
+        return PnRTag(tag, priority_major, priority_minor)
 
 
 def create_name(name: str):
