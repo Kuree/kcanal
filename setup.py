@@ -19,6 +19,7 @@ setup(
     install_requires=[
         "kratos",
     ],
+    license_files=['LICENSE'],
     python_requires=">=3.6",
     extras_require={
         "test": ["pytest", "archipelago"],
