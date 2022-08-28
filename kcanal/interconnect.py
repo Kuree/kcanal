@@ -1,7 +1,7 @@
 from typing import Dict, Tuple, List
 
 from .cyclone import InterconnectGraph, Tile, SwitchBoxIO, Node, SwitchBoxNode, RegisterMuxNode, create_name, \
-    SwitchBoxSide
+    SwitchBoxSide, PortNode
 from .circuit import TileCircuit
 from .logic import ReadyValidGenerator
 from .pnr import PnRTag
@@ -436,6 +436,49 @@ class Interconnect(ReadyValidGenerator):
             return graph.get_tile(x, y).switchbox.reg_muxs[rmux_name]
         else:
             raise Exception("Unknown node " + " ".join(node_str))
+
+    def get_route_bitstream(self, routes: Dict[str, List[List[Node]]]):
+        result = []
+        for _, route in routes.items():
+            for segment in route:
+                for i in range(len(segment) - 1):
+                    pre_node = segment[i]
+                    next_node = segment[i + 1]
+                    assert next_node in pre_node
+                    # notice that there is a corner case where the SB directly connect to the
+                    # next tile's CB
+                    if (pre_node.x != next_node.x or pre_node.y != next_node.y) and \
+                            (not (isinstance(pre_node, RegisterMuxNode) and isinstance(next_node, PortNode))):
+                        # inter tile connection. skipping for now
+                        continue
+                    if len(next_node.get_conn_in()) == 1:
+                        # no mux created. skip
+                        continue
+                    configs = self.get_node_bitstream_config(pre_node,
+                                                             next_node)
+                    for addr, data in configs:
+                        result.append((addr, data))
+        return result
+
+    def get_node_bitstream_config(self, src_node: Node, dst_node: Node, ):
+        # this is the complete one which includes the tile_id
+        x, y = dst_node.x, dst_node.y
+        tile = self.tile_circuits[(x, y)]
+        res = []
+        configs = tile.get_route_bitstream_config(src_node, dst_node)
+
+        def add_config(entry):
+            reg_addr, feat_addr, data = entry
+            addr = self.get_config_addr(reg_addr, feat_addr, x, y)
+            res.append((addr, data))
+
+        if isinstance(configs, list):
+            for en in configs:
+                add_config(en)
+        else:
+            add_config(configs)
+
+        return res
 
     def get_graph(self, bit_width: int):
         return self.__graphs[bit_width]
