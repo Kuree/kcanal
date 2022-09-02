@@ -41,6 +41,8 @@ class Tester(Generator):
         self.rst_n = 0
         delay(0, None)
         self.rst_n = 1
+        if "clk_en" in self.vars:
+            self.vars.clk_en = 1
         delay(0, None)
 
     def add_dut(self, mod: Generator, instance_name: str = "dut", create_var=True, initialize_port=True):
@@ -53,6 +55,12 @@ class Tester(Generator):
                 p = mod.ports[name]
                 if name not in self.vars:
                     v = self.var(name, p.width, size=p.size, packed=p.is_packed)
+                    if p.port_type == kratos.PortType.Clock:
+                        v = kratos.util.clock(v)
+                    elif p.port_type == kratos.PortType.ClockEnable:
+                        v = kratos.util.clock_en(v)
+                    elif p.port_type == kratos.PortType.AsyncReset:
+                        v = kratos.util.async_reset(v)
                     self.wire(v, p)
                     variables.append((v, p.port_direction == kratos.PortDirection.In))
             if initialize_port:

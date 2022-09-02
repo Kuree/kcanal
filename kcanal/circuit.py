@@ -371,6 +371,13 @@ class SB(Configurable):
             self.wire(en, (config_reg == index_val) & self.clk_en)
             self.wire(reg.clk_en, kratos.clock_en(en))
 
+    def get_route_bitstream_config(self, node_from: Node, node_to: Node):
+        assert node_from in node_to.get_conn_in()
+        sel_name, en_name = _get_mux_sel_name(node_to)
+        idx = node_to.get_conn_in().index(node_from)
+        config_data = [self.get_config_data(sel_name, idx), self.get_config_data(en_name, 1)]
+        return config_data
+
     def finalize(self):
         # connect internal sbs
         self.__connect_sbs()
